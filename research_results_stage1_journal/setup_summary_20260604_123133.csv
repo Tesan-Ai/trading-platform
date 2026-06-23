@@ -1,0 +1,4 @@
+strategy_name,setup_type,market_regime,setup_quality,closed_trades,win_rate,profit_factor,expectancy,total_pnl,average_winner,average_loser,average_risk_reward,average_hold_minutes,top_exit_reason
+momentum_breakout_v1,breakout,BULL_TREND,BAD_SETUP_BAD_OUTCOME,53,0.0,0.0,-1.4865675471697197,-78.78807999999515,0.0,-1.4865675471697197,0.7549346875924585,7.09433962264151,ATR stop loss
+momentum_breakout_v1,breakout,BULL_TREND,GOOD_SETUP_GOOD_OUTCOME,13,1.0,inf,0.6717003846154407,8.732105000000729,0.6717003846154407,0.0,0.776169883174415,3.3846153846153846,2R take profit
+momentum_breakout_v1,breakout,BULL_TREND,WORKED_BUT_REVIEW,5,1.0,inf,0.7991669999999829,3.9958349999999143,0.7991669999999829,0.0,1.20840133800812,12.8,regime flip

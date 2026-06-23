@@ -1,0 +1,2 @@
+run_id,symbols,BUY_START_TIME,BUY_END_TIME,RSI_MIN,RSI_MAX,ATR_STOP_MULTIPLE,ATR_EXTREME_PERCENT,MAX_HOLD_MINUTES,MAX_CAPITAL_PER_TRADE,MAX_POSITIONS,closed_trades,win_rate,profit_factor,expectancy,average_winner,average_loser,max_drawdown,sharpe,best_ticker,worst_ticker,best_time_of_day,worst_time_of_day,losing_streak,latest_regime,research_score
+1,"SPY,QQQ,XLC,XLY,XLP,XLE,XLF,XLV,XLI,XLB,XLRE,XLK,XLU,MTUM,QUAL,VLUE,USMV,SIZE",10:30,13:30,45.0,65.0,1.0,0.015,45,0.05,1,0,0.0,0.0,0.0,0.0,0.0,0.0,,,,,,0,UNKNOWN,-999999.0

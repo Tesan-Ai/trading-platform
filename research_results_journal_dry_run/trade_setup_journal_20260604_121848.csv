@@ -1,0 +1,1 @@
+run_id,symbol,strategy_name,setup_type,entry_timestamp,exit_timestamp,entry_price,exit_price,position_size,stop_loss,take_profit,risk_dollars,reward_dollars,risk_reward,pnl_dollars,pnl_percent,outcome,setup_quality,hold_time_minutes,market_regime,ema_trend,rsi,rvol,atr,vwap_position,spread,volume,entry_reason,exit_reason

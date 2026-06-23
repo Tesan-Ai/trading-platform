@@ -1,0 +1,3 @@
+timestamp,symbol,action,shares,price,position_value,score,pnl,reason
+2026-03-26 18:24:05,CSCO,BUY,37,79.0,2923.0,11.78,0.0,pullback bounce entry
+2026-03-26 18:43:41,CSCO,SELL,37,78.75,2913.75,5.43,-9.25,score dropped

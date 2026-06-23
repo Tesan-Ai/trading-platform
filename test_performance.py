@@ -1,0 +1,3 @@
+from performance import print_performance_summary
+
+print_performance_summary()
