@@ -43,7 +43,8 @@ class MomentumBreakoutStrategy:
         position: dict,
         features: dict,
         regime: dict,
-        holding_minutes: float
+        holding_minutes: float,
+        in_open_window: bool = False,
     ) -> tuple[bool, str]:
         close_price = float(features["close"])
 

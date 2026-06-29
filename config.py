@@ -9,7 +9,12 @@ load_dotenv()
 # =========================
 # TRADING MODE / GLOBAL GATES
 # =========================
-TRADING_MODE = os.getenv("TRADING_MODE", "PAPER_TRADING")
+_raw_trading_mode = os.getenv("TRADING_MODE", "PAPER")
+# Backward compatibility with older env values.
+if _raw_trading_mode == "PAPER_TRADING":
+    _raw_trading_mode = "PAPER"
+TRADING_MODE = _raw_trading_mode  # SIGNAL_ONLY | PAPER | LIVE
+ENABLE_LIVE_TRADING = os.getenv("ENABLE_LIVE_TRADING", "false").lower() == "true"
 LIVE_ENABLED = os.getenv("LIVE_ENABLED", "false").lower() == "true"
 GLOBAL_KILL_SWITCH = os.getenv("GLOBAL_KILL_SWITCH", "false").lower() == "true"
 ALLOW_UNVALIDATED_STRATEGY = False
@@ -29,10 +34,11 @@ ALPACA_DATA_FEED = os.getenv("ALPACA_DATA_FEED", "iex")
 # =========================
 # ACCOUNT SETTINGS
 # =========================
-INITIAL_CAPITAL = 25000
-PDT_MIN_EQUITY = 25000
-MIN_EQUITY_BUFFER = 2000
-DO_NOT_TRADE_BELOW_EQUITY = PDT_MIN_EQUITY + MIN_EQUITY_BUFFER
+INITIAL_CAPITAL = float(os.getenv("INITIAL_CAPITAL", "10000"))
+# Legacy names kept for compatibility; PDT $25k floor no longer enforced.
+PDT_MIN_EQUITY = 0
+MIN_EQUITY_BUFFER = 0
+DO_NOT_TRADE_BELOW_EQUITY = 0
 
 
 # =========================
@@ -180,6 +186,66 @@ ATR_PERIOD = 14
 ATR_STOP_MULTIPLE = 1.2
 ATR_EXTREME_PERCENT = 0.025
 TRAILING_STOP_R_MULTIPLE = 1.0
+
+
+# =========================
+# OPENING RANGE VWAP MOMENTUM v1
+# =========================
+ORVWAP_STRATEGY_NAME = "opening_range_vwap_momentum_v1"
+ORVWAP_UNIVERSE = [
+    "SPY",
+    "QQQ",
+    "NVDA",
+    "TSLA",
+    "AMD",
+    "AAPL",
+    "META",
+    "MSFT",
+    "AMZN",
+]
+# Trade these; SPY/QQQ are market-filter symbols only.
+ORVWAP_TRADE_SYMBOLS = [
+    "NVDA",
+    "TSLA",
+    "AMD",
+    "AAPL",
+    "META",
+    "MSFT",
+    "AMZN",
+]
+ORVWAP_TECH_SYMBOLS = {
+    "NVDA",
+    "TSLA",
+    "AMD",
+    "AAPL",
+    "META",
+    "MSFT",
+    "AMZN",
+}
+ORVWAP_OPENING_RANGE_START = "09:30"
+ORVWAP_OPENING_RANGE_END = "09:35"
+ORVWAP_ENTRY_START = "09:35"
+ORVWAP_ENTRY_END = "10:30"
+ORVWAP_FORCE_CLOSE_TIME = "15:55"
+ORVWAP_VOLUME_LOOKBACK = 20
+ORVWAP_MIN_VOLUME_RATIO = float(os.getenv("ORVWAP_MIN_VOLUME_RATIO", "1.8"))
+ORVWAP_OR_BREAKOUT_BUFFER_PCT = float(os.getenv("ORVWAP_OR_BREAKOUT_BUFFER_PCT", "0.0"))
+ORVWAP_MAX_SPREAD_PCT = float(os.getenv("ORVWAP_MAX_SPREAD_PCT", "0.15"))
+ORVWAP_MAX_VWAP_EXTENSION_ATR = float(os.getenv("ORVWAP_MAX_VWAP_EXTENSION_ATR", "1.5"))
+ORVWAP_STOP_PCT = 0.004
+ORVWAP_ATR_STOP_MULTIPLE = 0.5
+ORVWAP_STOP_SELECTION = os.getenv("ORVWAP_STOP_SELECTION", "widest")
+ORVWAP_EXIT_ON_VWAP_LOSS = os.getenv("ORVWAP_EXIT_ON_VWAP_LOSS", "false").lower() == "true"
+ORVWAP_TARGET_R = float(os.getenv("ORVWAP_TARGET_R", "2.0"))
+ORVWAP_USE_TRAILING_AFTER_1R = os.getenv("ORVWAP_USE_TRAILING_AFTER_1R", "false").lower() == "true"
+ORVWAP_RISK_PER_TRADE_PCT = float(os.getenv("ORVWAP_RISK_PER_TRADE_PCT", "0.00375"))
+ORVWAP_MAX_POSITIONS = 1
+ORVWAP_MAX_TRADES_PER_DAY = 3
+ORVWAP_MAX_LOSING_TRADES_PER_DAY = 2
+ORVWAP_MARKET_FILTER_SYMBOL = "SPY"
+ORVWAP_TECH_FILTER_SYMBOL = "QQQ"
+ORVWAP_SIGNAL_LOG_FILE = os.getenv("ORVWAP_SIGNAL_LOG_FILE", "logs/orvwap_signals.csv")
+ORVWAP_REPORT_DIR = os.getenv("ORVWAP_REPORT_DIR", "research_results_orvwap")
 
 
 # =========================

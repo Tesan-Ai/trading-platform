@@ -4,9 +4,10 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 import config
-from backtesting.profitability_replay import _is_entry_window_open
+from backtesting.profitability_replay import _is_entry_window_open, _position_size
 from features.daily_context import build_daily_regime_map, daily_regime_for_date
 from features.feature_store import add_feature_columns, latest_features
+from features.session_features import add_session_feature_columns, latest_session_features
 from historical_data import get_data_client
 from logger import log_trade
 from portfolio_manager import add_position, close_position, load_open_positions
@@ -101,14 +102,68 @@ def _fetch_regime_history(symbol, days_back=320):
     return pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
 
 
-def _position_size(cash: float, price: float) -> int:
-    trade_dollars = min(
-        cash * float(config.MAX_CAPITAL_PER_TRADE),
-        cash * float(config.MAX_PORTFOLIO_EXPOSURE),
+
+def _prepare_live_features(symbol, frame, strategy):
+    if getattr(strategy, "uses_session_features", False):
+        return add_session_feature_columns(frame)
+    return add_feature_columns(frame)
+
+
+def _latest_strategy_features(symbol, frame, strategy):
+    if getattr(strategy, "uses_session_features", False):
+        return latest_session_features(symbol, frame)
+    return latest_features(symbol, frame)
+
+
+def _resolve_live_regime(strategy, symbol_frames, trade_date):
+    if getattr(strategy, "name", "") == config.ORVWAP_STRATEGY_NAME:
+        spy_frame = symbol_frames.get(config.ORVWAP_MARKET_FILTER_SYMBOL)
+        qqq_frame = symbol_frames.get(config.ORVWAP_TECH_FILTER_SYMBOL)
+        if spy_frame is None or spy_frame.empty:
+            return {
+                "regime": "UNKNOWN",
+                "trade_allowed": False,
+                "reason": "missing SPY market data",
+                "spy_above_vwap": False,
+                "qqq_above_vwap": False,
+            }
+
+        spy_features = latest_session_features(config.ORVWAP_MARKET_FILTER_SYMBOL, spy_frame)
+        qqq_features = (
+            latest_session_features(config.ORVWAP_TECH_FILTER_SYMBOL, qqq_frame)
+            if qqq_frame is not None and not qqq_frame.empty
+            else None
+        )
+        spy_above_vwap = bool(spy_features and spy_features.get("above_vwap"))
+        qqq_above_vwap = bool(qqq_features.get("above_vwap")) if qqq_features else True
+        spy_lower_lows = bool(spy_features and spy_features.get("lower_lows_below_vwap"))
+
+        if not spy_above_vwap or spy_lower_lows:
+            reason = "SPY below VWAP" if not spy_above_vwap else "SPY making lower lows below VWAP"
+            return {
+                "regime": "RISK_OFF",
+                "trade_allowed": False,
+                "reason": reason,
+                "spy_above_vwap": spy_above_vwap,
+                "qqq_above_vwap": qqq_above_vwap,
+            }
+
+        return {
+            "regime": "BULL_INTRADAY",
+            "trade_allowed": True,
+            "reason": "SPY above VWAP",
+            "spy_above_vwap": spy_above_vwap,
+            "qqq_above_vwap": qqq_above_vwap,
+        }
+
+    regime_symbol = getattr(config, "MARKET_REGIME_SYMBOL", "QQQ")
+    regime_history = _fetch_regime_history(regime_symbol)
+    daily_regime_map = build_daily_regime_map(regime_history)
+    return daily_regime_for_date(
+        daily_regime_map,
+        trade_date,
+        lag_days=int(getattr(config, "DAILY_REGIME_LAG_DAYS", 1)),
     )
-    if trade_dollars < float(config.MIN_TRADE_DOLLARS) or price <= 0:
-        return 0
-    return int(trade_dollars // price)
 
 
 def _parse_stored_timestamp(timestamp_string):
@@ -119,8 +174,8 @@ def _parse_stored_timestamp(timestamp_string):
 def run_paper_trading_cycle(current_time=None):
     current_time = current_time or datetime.now(EASTERN)
     strategy = get_strategy()
-    symbols = list(getattr(config, "TRADE_SYMBOLS", ["QQQ", "SPY"]))
-    regime_symbol = getattr(config, "MARKET_REGIME_SYMBOL", "QQQ")
+    default_symbols = list(config.ORVWAP_UNIVERSE) if getattr(strategy, "uses_session_features", False) else ["QQQ", "SPY"]
+    symbols = list(getattr(config, "TRADE_SYMBOLS", default_symbols) or default_symbols)
 
     symbol_frames = _fetch_recent_bars(symbols)
     if not symbol_frames:
@@ -128,7 +183,7 @@ def run_paper_trading_cycle(current_time=None):
         return [], []
 
     featured = {
-        symbol: add_feature_columns(frame)
+        symbol: _prepare_live_features(symbol, frame, strategy)
         for symbol, frame in symbol_frames.items()
     }
     current_prices = {
@@ -137,23 +192,19 @@ def run_paper_trading_cycle(current_time=None):
         if not frame.empty
     }
 
-    regime_history = _fetch_regime_history(regime_symbol)
-    daily_regime_map = build_daily_regime_map(regime_history)
     trade_date = current_time.date()
-    regime = daily_regime_for_date(
-        daily_regime_map,
-        trade_date,
-        lag_days=int(getattr(config, "DAILY_REGIME_LAG_DAYS", 1)),
-    )
+    regime = _resolve_live_regime(strategy, symbol_frames, trade_date)
 
     equity = _estimate_equity(current_prices)
-    risk_gate = RiskGate(float(config.INITIAL_CAPITAL))
+    risk_gate = RiskGate(float(config.INITIAL_CAPITAL), strategy=strategy)
     risk_gate.update_equity(equity)
 
     sold = []
     bought = []
+    signal_only = config.TRADING_MODE == "SIGNAL_ONLY"
 
     print(f"\nStrategy: {strategy.name}")
+    print(f"Mode: {config.TRADING_MODE}")
     print(f"Regime: {regime.get('regime')} ({regime.get('reason')})")
 
     open_positions = load_open_positions()
@@ -162,7 +213,7 @@ def run_paper_trading_cycle(current_time=None):
         if symbol not in featured:
             continue
 
-        features = latest_features(symbol, symbol_frames[symbol])
+        features = _latest_strategy_features(symbol, symbol_frames[symbol])
         if features is None:
             continue
 
@@ -204,32 +255,60 @@ def run_paper_trading_cycle(current_time=None):
         return sold, bought
 
     if not regime.get("trade_allowed", False):
-        print("Entry blocked: daily regime not bullish.")
+        print("Entry blocked: market filter failed.")
         return sold, bought
 
-    open_symbols = {position["symbol"] for position in load_open_positions()}
+    open_symbols = {position["symbol"] for position in open_positions}
     cash = equity - sum(
         int(position["shares"]) * current_prices.get(position["symbol"], float(position["entry_price"]))
-        for position in load_open_positions()
+        for position in open_positions
     )
 
     for symbol in symbols:
         if symbol in open_symbols:
             continue
 
-        if len(load_open_positions()) >= int(config.MAX_POSITIONS):
+        if len(load_open_positions()) >= risk_gate._max_positions():
             break
 
-        features = latest_features(symbol, symbol_frames[symbol])
+        features = _latest_strategy_features(symbol, symbol_frames[symbol])
         if features is None:
             continue
 
-        passes, details = strategy.evaluate_entry(symbol, features, regime)
-        if not passes:
+        if hasattr(strategy, "build_signal_context"):
+            details = strategy.build_signal_context(symbol, features, regime)
+            passes = bool(details.get("entry_approved"))
+            from signal_logger import log_signal
+
+            log_signal("SIGNAL", details)
+            if not passes:
+                print(f"REJECT {symbol}: {details.get('rejection_reason')}")
+                continue
+        else:
+            passes, details = strategy.evaluate_entry(symbol, features, regime)
+            if not passes:
+                continue
+
+        shares = _position_size(
+            cash,
+            equity,
+            float(details["entry_price"]),
+            details.get("risk_per_share"),
+            strategy,
+        )
+        if shares < 1:
             continue
 
-        shares = _position_size(cash, float(details["entry_price"]))
-        if shares < 1:
+        if signal_only:
+            from signal_logger import log_signal
+
+            details["position_size"] = shares
+            details["account_equity"] = equity
+            log_signal("ENTRY", details)
+            print(
+                f"SIGNAL {symbol} @ {details['entry_price']:.2f} | "
+                f"stop={details['stop_price']:.2f} | target={details['target_price']:.2f}"
+            )
             continue
 
         add_position(

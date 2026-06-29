@@ -4,6 +4,7 @@ from .bull_day_trade import BullDayTradeStrategy
 from .momentum_scan import MomentumScanStrategy
 from .daily_trend import DailyTrendStrategy
 from .momentum_breakout import MomentumBreakoutStrategy
+from .opening_range_vwap_momentum import OpeningRangeVwapMomentumStrategy
 
 
 STRATEGY_REGISTRY = {
@@ -11,6 +12,7 @@ STRATEGY_REGISTRY = {
     "momentum_scan_v1": MomentumScanStrategy,
     "momentum_breakout_v1": MomentumBreakoutStrategy,
     "bull_day_trade_v1": BullDayTradeStrategy,
+    "opening_range_vwap_momentum_v1": OpeningRangeVwapMomentumStrategy,
 }
 
 

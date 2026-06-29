@@ -3,13 +3,16 @@ from bot_runner import run_trading_cycle
 from portfolio_manager import load_open_positions
 
 
-print("E*TRADE bot — paper trading mode")
+print("E*TRADE bot")
 print(f"Strategy: {config.ACTIVE_STRATEGY}")
-if config.ACTIVE_STRATEGY == "daily_trend_v1":
-    print(f"Symbols: {', '.join(config.TRADE_SYMBOLS)}")
+if config.ACTIVE_STRATEGY in {config.ORVWAP_STRATEGY_NAME, "daily_trend_v1"}:
+    symbols = list(getattr(config, "TRADE_SYMBOLS", []) or config.ORVWAP_UNIVERSE)
+    print(f"Symbols: {', '.join(symbols)}")
 else:
     print(f"Scan mode: {getattr(config, 'SCAN_MODE', 'market')} (full US equity universe)")
 print(f"Trading mode: {config.TRADING_MODE}")
+if config.TRADING_MODE == "LIVE":
+    print(f"Live enabled: {config.ENABLE_LIVE_TRADING or config.LIVE_ENABLED}")
 print()
 
 sold_trades, bought_trades = run_trading_cycle()

@@ -50,7 +50,7 @@ def get_current_equity():
 
 
 def get_minimum_trading_equity():
-    if config.TRADING_MODE == "PAPER_TRADING":
+    if config.TRADING_MODE in {"PAPER", "PAPER_TRADING", "SIGNAL_ONLY"}:
         return 0.0
     return float(getattr(config, "DO_NOT_TRADE_BELOW_EQUITY", 0.0))
 
@@ -67,9 +67,7 @@ def get_tradable_equity():
 
 
 def has_pdt_cushion():
-    if config.TRADING_MODE == "PAPER_TRADING":
-        return get_current_equity() >= float(config.PDT_MIN_EQUITY)
-    return get_tradable_equity() > 0
+    return get_current_equity() > 0
 
 
 def get_max_trade_dollars():
