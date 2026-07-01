@@ -3,3 +3,10 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+.pytest_cache/
+.coverage
+htmlcov/
+logs/orvwap_signals.csv
+research_results/experiments/
+research_results/research_lab/
+research_results_orvwap/

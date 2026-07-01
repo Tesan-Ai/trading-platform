@@ -31,6 +31,12 @@ ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
 ALPACA_DATA_URL = "https://data.alpaca.markets"
 ALPACA_DATA_FEED = os.getenv("ALPACA_DATA_FEED", "iex")
+
+# PLATFORM INTEGRATIONS
+BROKER_PROVIDER = os.getenv("BROKER_PROVIDER", "csv")  # csv | alpaca_paper
+SUPABASE_ENABLED = os.getenv("SUPABASE_ENABLED", "false").lower() == "true"
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 # =========================
 # ACCOUNT SETTINGS
 # =========================
@@ -213,6 +219,16 @@ ORVWAP_TRADE_SYMBOLS = [
     "MSFT",
     "AMZN",
 ]
+ORVWAP_EXCLUDED_SYMBOLS = {
+    symbol.strip().upper()
+    for symbol in os.getenv("ORVWAP_EXCLUDED_SYMBOLS", "").split(",")
+    if symbol.strip()
+}
+ORVWAP_BLOCKED_ENTRY_HOURS_ET = {
+    int(value.strip())
+    for value in os.getenv("ORVWAP_BLOCKED_ENTRY_HOURS_ET", "").split(",")
+    if value.strip()
+}
 ORVWAP_TECH_SYMBOLS = {
     "NVDA",
     "TSLA",

@@ -1,0 +1,32 @@
+services:
+  - type: worker
+    name: etrade-bot-paper-worker
+    runtime: docker
+    plan: starter
+    envVars:
+      - key: TRADING_MODE
+        value: SIGNAL_ONLY
+      - key: ACTIVE_STRATEGY
+        value: opening_range_vwap_momentum_v1
+      - key: ENABLE_LIVE_TRADING
+        value: "false"
+      - key: GLOBAL_KILL_SWITCH
+        value: "false"
+
+  - type: web
+    name: etrade-bot-dashboard
+    runtime: docker
+    plan: starter
+    dockerCommand: streamlit run streamlit_app.py --server.port $PORT --server.address 0.0.0.0
+    envVars:
+      - key: TRADING_MODE
+        value: SIGNAL_ONLY
+
+cronJobs:
+  - name: etrade-bot-daily-walk-forward
+    runtime: docker
+    schedule: "0 22 * * 1-5"
+    dockerCommand: python walk_forward_runner.py --strategy opening_range_vwap_momentum_v1 --start-date 2025-09-03 --end-date 2026-06-03 --orvwap-quality-profile
+    envVars:
+      - key: TRADING_MODE
+        value: SIGNAL_ONLY

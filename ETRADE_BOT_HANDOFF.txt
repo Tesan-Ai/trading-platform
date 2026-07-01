@@ -1,0 +1,514 @@
+ETRADE BOT HANDOFF / CURRENT IMPLEMENTATION OVERVIEW
+
+Project path:
+/Users/TesanJoe/Desktop/etrade-bot
+
+Current state in one sentence:
+We have moved the project from a simple local E*TRADE-style trading bot into a staged trading platform: research/backtesting first, then validation gates, then paper trading, broker reconciliation, Supabase persistence, monitoring, and eventually live trading only after strict checks.
+
+IMPORTANT CONTEXT
+
+The last remembered stopping point was Supabase setup.
+
+The code for Supabase is already scaffolded, but the external Supabase project still needs to be set up:
+- Create the Supabase project.
+- Run database/schema.sql in Supabase SQL editor.
+- Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to .env.
+- Set SUPABASE_ENABLED=true when ready.
+
+Until that is done, the app still runs because Supabase writes are best-effort and disabled by default.
+
+WHAT IS IMPLEMENTED
+
+1. Trading mode and safety gates
+
+config.py now has platform-level trading modes and safety controls:
+- TRADING_MODE supports SIGNAL_ONLY, PAPER, and LIVE.
+- ENABLE_LIVE_TRADING and LIVE_ENABLED exist as extra live-trading switches.
+- GLOBAL_KILL_SWITCH exists.
+- ALLOW_UNVALIDATED_STRATEGY is set to False.
+- LIVE trading is intentionally gated and not meant to happen unless explicitly enabled and validated.
+
+Paper/live promotion thresholds are defined:
+- MIN_PAPER_TRADES_BEFORE_LIVE = 100
+- MIN_PROFIT_FACTOR_BEFORE_LIVE = 1.25
+- MIN_EXPECTANCY_BEFORE_LIVE = 0.0
+- MAX_VALIDATED_DRAWDOWN = 0.08
+
+2. Active strategy system
+
+There is a strategy factory and multiple strategies in strategies/:
+- momentum_scan_v1
+- momentum_breakout_v1
+- daily_trend_v1
+- bull_day_trade
+- opening_range_vwap_momentum_v1
+
+The most researched strategy appears to be:
+opening_range_vwap_momentum_v1
+
+The OR/VWAP strategy uses:
+- Opening range from 09:30 to 09:35 ET.
+- Entry window from 09:35 to 10:30 ET.
+- Forced close at 15:55 ET.
+- SPY/QQQ market filter logic.
+- Volume ratio filter.
+- VWAP extension filter.
+- ATR/percentage stop logic.
+- Target R logic.
+- Optional trailing after 1R.
+- Max positions/trades/day controls.
+
+The configured OR/VWAP universe includes:
+SPY, QQQ, NVDA, TSLA, AMD, AAPL, META, MSFT, AMZN
+
+Trade symbols exclude SPY/QQQ because those are mainly used as market filters:
+NVDA, TSLA, AMD, AAPL, META, MSFT, AMZN
+
+3. Backtesting and research
+
+The repo has multiple research/backtest runners:
+- backtest_runner.py
+- orvwap_backtest_runner.py
+- one_day_backtest_runner.py
+- overnight_research_runner.py
+- replay_runner.py
+- walk_forward_runner.py
+- profitability_runner.py
+
+There is a replay engine and profitability replay system:
+- replay_engine.py
+- backtesting/profitability_replay.py
+
+There are historical CSVs for symbols including:
+AAPL, AMD, AMZN, META, MSFT, NVDA, PLTR, QQQ, RKLB, SOFI, SPY, TSLA, sector ETFs, and factor ETFs.
+
+Research output directories already exist:
+- research_results_etf_9mo
+- research_results_stage1_journal
+- research_results_journal_dry_run
+- research_results_orvwap
+- research_results/experiments
+- multiple ETF loose/timing/no-breakout test folders
+
+There is a research summary in:
+research_results_etf_9mo/ETF_9MO_RESEARCH_SUMMARY.md
+
+4. Walk-forward validation
+
+walk_forward_runner.py is implemented.
+
+It:
+- Runs fold-based walk-forward validation.
+- Defaults to 2025-09-03 through 2026-06-03.
+- Defaults to 1-month folds.
+- Runs replay/backtesting per fold.
+- Aggregates trades and reports.
+- Calculates metrics.
+- Applies validation gates.
+- Builds strategy scorecards.
+- Records experiments to research_results/experiments.
+
+Example command from PLATFORM_ARCHITECTURE.md:
+
+.venv/bin/python walk_forward_runner.py \
+  --strategy opening_range_vwap_momentum_v1 \
+  --start-date 2025-09-03 \
+  --end-date 2026-06-03 \
+  --orvwap-quality-profile
+
+The OR/VWAP quality profile:
+- Relaxes filters.
+- Uses MSFT/META only by excluding NVDA, TSLA, AAPL, AMZN, AMD.
+
+5. Validation gates
+
+validation/performance_gate.py is implemented.
+
+Backtest gate checks:
+- Minimum closed trades.
+- Profit factor.
+- Expectancy.
+- Max drawdown.
+- Win rate.
+
+Default backtest thresholds:
+- Minimum closed trades: 30
+- Minimum profit factor: 1.15
+- Minimum expectancy: above 0.0
+- Maximum drawdown: 8%
+- Minimum win rate: 40%
+
+Gate statuses:
+- Failed backtest = RESEARCH_ONLY
+- Passed backtest = PAPER_CANDIDATE
+- Passed paper/live gate = LIVE_CANDIDATE
+
+6. Experiment tracking
+
+experiments/ exists.
+
+The system records validation/research runs into:
+research_results/experiments/
+
+It also maintains:
+research_results/experiments/experiment_summary.csv
+
+These experiment records are used by the Streamlit dashboard.
+
+7. Strategy scorecards
+
+analytics/strategy_scorecard.py exists.
+
+The walk-forward runner builds and prints scorecards, intended to evaluate performance by dimensions like symbol/day/regime/exit reason. This is part of the promotion workflow so we do not promote a strategy based only on one aggregate metric.
+
+8. Signal logging
+
+signal_logger.py is implemented.
+
+Signals are logged to:
+logs/orvwap_signals.csv
+
+Logged signal fields include:
+- timestamp
+- ticker
+- mode
+- price
+- opening range high/low
+- VWAP
+- current volume
+- 20-period average volume
+- volume ratio
+- ATR
+- distance from VWAP
+- spread
+- whether entry was approved
+- rejection reason
+- entry/stop/target prices
+- position size
+- exit price/reason
+- realized PnL
+- account equity
+- strategy version
+- SPY/QQQ VWAP filter state
+- market filter reason
+- event type
+
+Signal logging also calls save_signal(), which writes to Supabase if Supabase is enabled.
+
+9. Supabase database layer
+
+database/ is implemented with:
+- database/schema.sql
+- database/supabase_client.py
+- database/repositories.py
+
+Supabase schema includes:
+- experiments
+- signals
+- orders
+- fills
+- positions
+- risk_events
+- daily_reports
+
+database/supabase_client.py:
+- Reads SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
+- Returns None if missing.
+- Uses supabase.create_client when configured.
+
+database/repositories.py:
+- save_experiment()
+- save_signal()
+- save_order()
+- save_positions()
+- save_risk_event()
+
+Important behavior:
+- Supabase writes only happen if SUPABASE_ENABLED=true.
+- If Supabase is not configured, functions return without breaking the app.
+- Inserts are best-effort and exceptions are swallowed for now.
+
+10. Broker abstraction
+
+brokers/ is implemented.
+
+Files:
+- brokers/base.py
+- brokers/factory.py
+- brokers/alpaca_paper.py
+- brokers/reconciliation.py
+
+brokers/base.py defines:
+- OrderRequest
+- OrderResult
+- Position
+- Broker protocol
+
+brokers/factory.py supports:
+- csv provider, which returns None and keeps local CSV behavior.
+- alpaca_paper provider, which uses AlpacaPaperBroker.
+
+config.py has:
+BROKER_PROVIDER=csv by default
+
+To use Alpaca paper broker:
+BROKER_PROVIDER=alpaca_paper
+
+11. Alpaca paper broker
+
+brokers/alpaca_paper.py is implemented.
+
+It:
+- Uses ALPACA_API_KEY and ALPACA_SECRET_KEY.
+- Connects to Alpaca TradingClient with paper=True.
+- Fetches current broker positions.
+- Saves positions to Supabase if enabled.
+- Submits market orders.
+- Closes positions.
+- Saves order records to Supabase if enabled.
+
+This is a paper broker implementation, not live trading.
+
+12. Broker reconciliation
+
+brokers/reconciliation.py is implemented.
+
+It compares:
+- Local CSV/open positions
+- Broker positions
+
+It detects:
+- Positions missing locally.
+- Positions missing at broker.
+- Quantity mismatches.
+
+If reconciliation fails:
+- It returns ok=False.
+- It records a BROKER_RECONCILIATION_FAILED risk event to Supabase if enabled.
+- paper_trader.py blocks new entries when broker reconciliation fails.
+
+There is also:
+reconcile_runner.py
+
+This is a standalone runner for reconciliation.
+
+13. Paper trading cycle
+
+paper_trader.py is implemented as the live-ish/paper execution engine.
+
+It:
+- Fetches recent market data from Alpaca.
+- Builds features.
+- Resolves market regime.
+- Estimates current equity.
+- Applies RiskGate.
+- Loads local open positions.
+- If broker is enabled, reconciles local and broker positions.
+- Evaluates exits.
+- Places sell/close actions through broker if configured.
+- Logs sells.
+- Checks entry window.
+- Checks risk gate.
+- Checks market regime.
+- Evaluates entries.
+- Places buy orders through broker if configured.
+- Updates local CSV positions.
+
+TRADING_MODE=SIGNAL_ONLY means no broker.
+BROKER_PROVIDER=csv keeps old local CSV behavior.
+BROKER_PROVIDER=alpaca_paper connects to Alpaca paper.
+
+14. Risk management
+
+risk/ exists with:
+- risk/risk_gate.py
+
+There is also:
+- risk_manager.py
+
+Risk settings in config.py include:
+- MAX_POSITIONS = 2
+- MAX_CAPITAL_PER_TRADE = 0.10
+- MAX_PORTFOLIO_EXPOSURE = 0.40
+- MAX_DAILY_LOSS_PERCENT = 0.01
+- MAX_DAILY_LOSS_DOLLARS = 150
+- MAX_DRAWDOWN_PERCENT = 0.05
+- MAX_TRADES_PER_DAY = 5
+- LOSING_STREAK_COOLDOWN = 2
+- LOSING_STREAK_COOLDOWN_MINUTES = 120
+- MIN_TRADE_DOLLARS = 250
+- MAX_SECTOR_EXPOSURE = 0.25
+
+15. Market regime and features
+
+features/ is implemented:
+- daily_context.py
+- feature_store.py
+- session_features.py
+
+regime/ is implemented:
+- market_regime.py
+
+OR/VWAP uses session features like VWAP, opening range, volume, ATR, etc.
+
+The live/paper flow resolves market regime differently for OR/VWAP:
+- Uses SPY session features.
+- Uses QQQ session features for tech confirmation.
+- Blocks entries if SPY is below VWAP or making lower lows below VWAP.
+- Allows entries when SPY is above VWAP.
+
+16. Monitoring and alerts
+
+monitoring/ is implemented:
+- sentry_setup.py
+- alerts.py
+
+Sentry setup exists and is called in:
+- main.py
+- walk_forward_runner.py
+
+alerts.py supports best-effort alerts via:
+- Slack webhook
+- Discord webhook
+- Email SMTP
+
+Environment variables include:
+- ALERT_SLACK_WEBHOOK_URL
+- ALERT_DISCORD_WEBHOOK_URL
+- DAILY_REPORT_EMAIL_TO
+- DAILY_REPORT_EMAIL_FROM
+- SMTP_HOST
+- SMTP_USERNAME
+- SMTP_PASSWORD
+- SMTP_PORT
+
+17. Dashboard
+
+streamlit_app.py is implemented.
+
+It shows:
+- Latest experiment status.
+- Profit factor.
+- Expectancy.
+- Closed trades.
+- Experiment history from research_results/experiments/experiment_summary.csv.
+- Recent OR/VWAP signals from logs/orvwap_signals.csv.
+
+This is a simple current dashboard. The architecture doc says Next.js can come later if needed.
+
+18. Deployment/devops scaffolding
+
+Deployment-related files exist:
+- Dockerfile
+- .dockerignore
+- render.yaml
+- .github/
+- requirements.txt
+- .env.example
+
+PLATFORM_ARCHITECTURE.md documents the planned stack:
+- Broker: Alpaca paper first
+- Database: Supabase Postgres
+- Runtime: Python Docker on Render worker/cron
+- Dashboard: Streamlit now, Next.js later
+- Monitoring: Sentry, Slack/Discord, daily email
+- DevOps: GitHub Actions, pytest, .env secrets
+
+19. Main entrypoint
+
+main.py:
+- Initializes Sentry.
+- Prints bot name, active strategy, symbols/scan mode, and trading mode.
+- Calls run_trading_cycle() from bot_runner.py.
+- Prints sells/buys and current open positions.
+
+20. Tests
+
+There are tests for OR/VWAP:
+- tests/test_opening_range_vwap_momentum.py
+
+There is also:
+- test_performance.py
+
+I did not verify the full test suite in this handoff pass.
+
+21. Current git/worktree state
+
+The repo has many modified/untracked files, likely from recent implementation work.
+
+Modified files include:
+- .env.example
+- .gitignore
+- config.py
+- dashboard/report.py
+- main.py
+- paper_trader.py
+- requirements.txt
+- signal_logger.py
+- strategies/opening_range_vwap_momentum.py
+- tests/test_opening_range_vwap_momentum.py
+
+New/untracked areas include:
+- database/
+- brokers/
+- monitoring/
+- validation/
+- experiments/
+- analytics/strategy_scorecard.py
+- streamlit_app.py
+- walk_forward_runner.py
+- reconcile_runner.py
+- Dockerfile
+- render.yaml
+- PLATFORM_ARCHITECTURE.md
+
+WHAT STILL NEEDS TO BE DONE NEXT
+
+Highest-priority next step:
+Finish Supabase setup and verify writes.
+
+Supabase setup checklist:
+1. Create Supabase project.
+2. Open Supabase SQL editor.
+3. Paste and run database/schema.sql.
+4. Add these to .env:
+   SUPABASE_ENABLED=true
+   SUPABASE_URL=your project URL
+   SUPABASE_SERVICE_ROLE_KEY=your service role key
+5. Run a small test that calls save_signal() or run a signal/paper cycle.
+6. Confirm rows appear in Supabase signals/risk_events/positions/experiments as expected.
+
+After Supabase:
+1. Verify .env.example matches all required env vars.
+2. Run pytest.
+3. Run walk_forward_runner.py for OR/VWAP quality profile.
+4. Review research_results/experiments/experiment_summary.csv.
+5. Open Streamlit dashboard.
+6. Test BROKER_PROVIDER=csv mode.
+7. Test BROKER_PROVIDER=alpaca_paper in paper mode after Alpaca credentials are set.
+8. Test reconcile_runner.py.
+9. Decide whether the next build task is:
+   - Supabase smoke test script
+   - Better dashboard backed directly by Supabase
+   - Paper trading journal ingestion
+   - Alerting/daily report runner
+   - More OR/VWAP strategy refinement
+   - Render deployment
+
+SUGGESTED PROMPT TO GIVE CODEX NEXT
+
+We are working in /Users/TesanJoe/Desktop/etrade-bot. This is a Python trading bot/platform. We have already implemented research/backtesting, OR/VWAP strategy work, walk-forward validation, validation gates, experiment tracking, a broker abstraction, Alpaca paper broker support, broker reconciliation, signal logging, Supabase repository scaffolding, monitoring hooks, Streamlit dashboard, Docker/Render scaffolding, and platform architecture docs.
+
+We last left off at Supabase setup. The code has database/schema.sql, database/supabase_client.py, and database/repositories.py. Supabase writes are gated by SUPABASE_ENABLED and require SUPABASE_URL plus SUPABASE_SERVICE_ROLE_KEY. The schema has experiments, signals, orders, fills, positions, risk_events, and daily_reports.
+
+Please help me continue from there. First inspect the repo, then verify the Supabase integration path end to end. I want you to:
+1. Review database/schema.sql and repository functions.
+2. Check .env.example for all needed variables.
+3. Add a small Supabase smoke-test script if one does not exist.
+4. Make sure the script safely verifies connection and can insert/read a test risk_event or signal without affecting trading.
+5. Run tests if possible.
+6. Tell me exactly what I need to paste into Supabase and what env vars I need to set.
+
+Keep live trading disabled. Do not enable LIVE mode. Keep the work focused on Supabase verification and platform readiness.
+

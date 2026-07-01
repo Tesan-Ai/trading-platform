@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 
 import config
+from database.repositories import save_signal
 
 SIGNAL_FIELDS = [
     "timestamp",
@@ -61,6 +62,8 @@ def log_signal(event_type: str, payload: dict, log_file: str | None = None) -> N
     with open(path, "a", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=SIGNAL_FIELDS)
         writer.writerow(row)
+
+    save_signal(event_type, row)
 
 
 def summarize_rejections(log_file: str | None = None) -> dict[str, int]:

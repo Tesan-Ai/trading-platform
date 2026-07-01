@@ -2,6 +2,7 @@ import config
 from analytics.trade_analytics import print_report
 from backtesting.profitability_replay import run_profitability_replay
 from risk_manager import get_current_equity, get_tradable_equity, can_open_new_position
+from validation.performance_gate import evaluate_validation_gate
 
 
 def print_dashboard(symbols=None) -> None:
@@ -43,21 +44,4 @@ def print_dashboard(symbols=None) -> None:
 
 
 def validate_paper_gate(report: dict) -> dict:
-    reasons = []
-
-    if report.get("closed_trades", 0) < config.MIN_PAPER_TRADES_BEFORE_LIVE:
-        reasons.append("not enough paper trades")
-
-    if report.get("expectancy", 0.0) <= config.MIN_EXPECTANCY_BEFORE_LIVE:
-        reasons.append("expectancy is not positive")
-
-    if report.get("profit_factor", 0.0) < config.MIN_PROFIT_FACTOR_BEFORE_LIVE:
-        reasons.append("profit factor below live threshold")
-
-    if report.get("max_drawdown", 1.0) > config.MAX_VALIDATED_DRAWDOWN:
-        reasons.append("drawdown above validation threshold")
-
-    return {
-        "passes": not reasons,
-        "reasons": reasons or ["paper-trading gate conditions satisfied"]
-    }
+    return evaluate_validation_gate(report, stage="paper_to_live")

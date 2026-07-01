@@ -1,7 +1,8 @@
 from strategies.opening_range_vwap_momentum import OpeningRangeVwapMomentumStrategy
 
 
-def test_stop_loss_uses_tightest_valid_candidate():
+def test_stop_loss_uses_tightest_valid_candidate(monkeypatch):
+    monkeypatch.setattr("config.ORVWAP_STOP_SELECTION", "tightest")
     strategy = OpeningRangeVwapMomentumStrategy()
     features = {
         "vwap": 99.0,
@@ -10,6 +11,18 @@ def test_stop_loss_uses_tightest_valid_candidate():
     }
     stop = strategy._select_stop_loss(100.0, features)
     assert stop == 99.6
+
+
+def test_stop_loss_uses_widest_valid_candidate(monkeypatch):
+    monkeypatch.setattr("config.ORVWAP_STOP_SELECTION", "widest")
+    strategy = OpeningRangeVwapMomentumStrategy()
+    features = {
+        "vwap": 99.0,
+        "opening_range_midpoint": 98.5,
+        "atr_14": 2.0,
+    }
+    stop = strategy._select_stop_loss(100.0, features)
+    assert stop == 98.5
 
 
 def test_rejects_symbol_outside_universe():

@@ -4,6 +4,9 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 import config
+from brokers.base import OrderRequest
+from brokers.factory import get_broker
+from brokers.reconciliation import reconcile_positions
 from backtesting.profitability_replay import _is_entry_window_open, _position_size
 from features.daily_context import build_daily_regime_map, daily_regime_for_date
 from features.feature_store import add_feature_columns, latest_features
@@ -202,12 +205,20 @@ def run_paper_trading_cycle(current_time=None):
     sold = []
     bought = []
     signal_only = config.TRADING_MODE == "SIGNAL_ONLY"
+    broker = None if signal_only else get_broker()
 
     print(f"\nStrategy: {strategy.name}")
     print(f"Mode: {config.TRADING_MODE}")
     print(f"Regime: {regime.get('regime')} ({regime.get('reason')})")
 
     open_positions = load_open_positions()
+    if broker is not None:
+        reconciliation = reconcile_positions(open_positions, broker.get_positions())
+        if not reconciliation.ok:
+            print("Entry blocked: broker reconciliation failed.")
+            print(f"Issues: {', '.join(reconciliation.issues)}")
+            return sold, bought
+
     for position in open_positions:
         symbol = position["symbol"]
         if symbol not in featured:
@@ -240,6 +251,8 @@ def run_paper_trading_cycle(current_time=None):
 
         current_price = float(features["close"])
         shares = int(position["shares"])
+        if broker is not None:
+            broker.close_position(symbol)
         close_position(symbol)
         pnl = round((current_price - float(position["entry_price"])) * shares, 2)
         log_trade("SELL", symbol, current_price, shares, round(current_price * shares, 2), 0.0, pnl, reason)
@@ -310,6 +323,15 @@ def run_paper_trading_cycle(current_time=None):
                 f"stop={details['stop_price']:.2f} | target={details['target_price']:.2f}"
             )
             continue
+
+        if broker is not None:
+            broker.submit_order(
+                OrderRequest(
+                    symbol=symbol,
+                    side="buy",
+                    quantity=shares,
+                )
+            )
 
         add_position(
             symbol=symbol,

@@ -1,7 +1,10 @@
 import config
 from bot_runner import run_trading_cycle
+from monitoring.sentry_setup import init_sentry
 from portfolio_manager import load_open_positions
 
+
+init_sentry()
 
 print("E*TRADE bot")
 print(f"Strategy: {config.ACTIVE_STRATEGY}")

@@ -1,4 +1,9 @@
+from zoneinfo import ZoneInfo
+
 import config
+
+
+EASTERN = ZoneInfo("America/New_York")
 
 
 class OpeningRangeVwapMomentumStrategy:
@@ -173,6 +178,13 @@ class OpeningRangeVwapMomentumStrategy:
         if symbol not in self.UNIVERSE:
             return "symbol outside v1 universe"
 
+        if symbol in getattr(config, "ORVWAP_EXCLUDED_SYMBOLS", set()):
+            return "symbol excluded by research filter"
+
+        blocked_hour_reason = self._blocked_entry_hour_reason(features)
+        if blocked_hour_reason is not None:
+            return blocked_hour_reason
+
         if not bool(features.get("in_entry_window", False)):
             return "outside entry window"
 
@@ -239,3 +251,14 @@ class OpeningRangeVwapMomentumStrategy:
         buffer_pct = float(config.ORVWAP_OR_BREAKOUT_BUFFER_PCT)
         threshold = float(or_high) * (1.0 - buffer_pct / 100.0)
         return float(close_price) > threshold
+
+    def _blocked_entry_hour_reason(self, features: dict) -> str | None:
+        blocked_hours = getattr(config, "ORVWAP_BLOCKED_ENTRY_HOURS_ET", set())
+        timestamp = features.get("timestamp")
+        if not blocked_hours or timestamp is None:
+            return None
+
+        eastern_hour = timestamp.to_pydatetime().astimezone(EASTERN).hour
+        if eastern_hour in blocked_hours:
+            return f"blocked entry hour {eastern_hour:02d}:00 ET"
+        return None
