@@ -1,0 +1,2522 @@
+{
+  "run_id": "20260701_210553_orb_pbc_v1_0184ade5",
+  "created_at": "2026-07-01T21:05:53.989593+00:00",
+  "strategy_name": "orb_pullback_continuation_v1",
+  "strategy_version": "1.0",
+  "profile": "all_symbols_filter_driven",
+  "start_date": "2025-09-03",
+  "end_date": "2026-06-03",
+  "symbols": [
+    "NVDA",
+    "META",
+    "AMD",
+    "TSLA",
+    "AAPL",
+    "MSFT",
+    "AMZN"
+  ],
+  "market_filters": [
+    "SPY",
+    "QQQ"
+  ],
+  "starting_equity": 10000.0,
+  "status": "RESEARCH_ONLY",
+  "recommendation": {
+    "recommendation": "RESEARCH_ONLY",
+    "reason": "One or more explicit REJECT conditions were triggered: REJECT: trade frequency 9.9/year < 40/year (likely a data-window limitation, not a filter-loosening opportunity)"
+  },
+  "edge_hypothesis": "Liquid mega-cap names occasionally open with abnormal volume while the index (SPY/QQQ) is directionally aligned. On those days, institutional VWAP/POV-style execution can create persistent one-directional order flow for 1-3 hours. Raw opening-range breakout entries buy at maximum short-term extension and are exposed to breakout-fade algos selling into that same candle; many fake breakouts die within 2-5 candles. Requiring a held pullback after a confirmed breakout, and only entering on a break of the pullback bar's high, avoids most fakeouts, gives a better price location, and gives a more meaningful stop below the pullback low. RVOL + gap filters select catalyst-like days; SPY/QQQ VWAP alignment avoids single-stock strength being absorbed by index-level selling. Stacked edge: catalyst-day selection (RVOL) x directional confirmation (ORB) x market alignment (SPY/QQQ VWAP) x superior pullback entry x structural stop below the pullback low.",
+  "implementation_fidelity_checklist": {
+    "no_breakout_candle_entry": {
+      "implemented": true,
+      "detail": "generate_signal() only returns a Signal from ARMED_TRIGGER, reached only after a held pullback; the breakout bar itself only moves the state from WAIT_BREAKOUT to WAIT_PULLBACK and can never fire a trade."
+    },
+    "fifteen_minute_opening_range": {
+      "implemented": true,
+      "detail": "features/intraday_indicators.compute_opening_range() uses the 09:30:00-09:44:59 ET window (opening_range_minutes=15 by default)."
+    },
+    "pullback_state_machine": {
+      "implemented": true,
+      "detail": "WAIT_BREAKOUT -> WAIT_PULLBACK -> ARMED_TRIGGER implemented in generate_signal() with re-arm (max 2) and retry (max 1) limits."
+    },
+    "time_of_day_matched_rvol": {
+      "implemented": true,
+      "detail": "features/intraday_indicators.add_time_of_day_rvol() divides today's cumulative volume by the trailing-20-session average cumulative volume at the SAME clock time, not a naive full-day average."
+    },
+    "spy_qqq_vwap_agreement": {
+      "implemented": true,
+      "detail": "check_market_filter() requires both SPY and QQQ closed 5m bars above their own session VWAP; disagreement structurally fails both checks simultaneously."
+    },
+    "or_width_sanity_filter": {
+      "implemented": true,
+      "detail": "check_market_filter() requires 0.15*ATR_D <= OR width <= 1.0*ATR_D."
+    },
+    "gap_and_fade_blacklist": {
+      "implemented": true,
+      "detail": "features/intraday_indicators.add_gap_and_fade_flag() flags sessions with gap > 1*ATR_D closing in the bottom third of the first 15-minute bar and below the open; check_market_filter() rejects them."
+    },
+    "vwap_cross_chop_filter": {
+      "implemented": true,
+      "detail": "features/intraday_indicators.add_vwap_cross_count() counts VWAP crosses per session; check_market_filter() rejects > 4 crosses."
+    },
+    "daily_atr_percent_filter": {
+      "implemented": true,
+      "detail": "check_market_filter() rejects stock ATR_D_pct < 0.015."
+    },
+    "five_minute_atr_percentile_chaos_filter": {
+      "implemented": true,
+      "detail": "features/intraday_indicators.add_atr5m_percentile_threshold() computes a trailing-20-session 98th percentile of 5m ATR; check_market_filter() rejects bars above that threshold."
+    },
+    "stop_distance_cap": {
+      "implemented": true,
+      "detail": "calculate_stop() returns None (skip trade) when entry-stop distance exceeds 1.5*ATR_5m."
+    },
+    "scale_out_at_1r": {
+      "implemented": true,
+      "detail": "should_exit() returns SCALE_HALF at +1.0R and marks position.scaled."
+    },
+    "breakeven_after_scale": {
+      "implemented": true,
+      "detail": "should_exit() moves position.stop to entry + 0.1R at the same time it scales out at +1.0R."
+    },
+    "runner_trail": {
+      "implemented": true,
+      "detail": "should_exit() applies a chandelier stop (highest_high - 2.2*ATR_5m) and a 5m close-below-EMA9 exit once the position has scaled."
+    },
+    "eod_flatten": {
+      "implemented": true,
+      "detail": "should_exit() forces EOD_FLATTEN at/after 15:50 ET regardless of any other condition."
+    },
+    "long_only": {
+      "implemented": true,
+      "detail": "There is no short/SELL-first code path anywhere in generate_signal() or Signal; side is hardcoded to 'LONG'."
+    },
+    "spread_filter": {
+      "implemented": "conditional",
+      "detail": "spread_pct is honored when SymbolSnapshot.spread_available=True. Historical 1-minute OHLCV bars in this repo do not include bid/ask, so the backtest engine marks spread as UNAVAILABLE and reports it explicitly rather than fabricating a spread."
+    },
+    "fomc_calendar_filter": {
+      "implemented": false,
+      "detail": "No economic calendar exists in this repo. The strategy's own 11:15 ET entry cutoff makes a 13:30-14:00 FOMC block moot for v1.0, but no calendar-driven check was implemented. Documented as a TODO."
+    }
+  },
+  "data_availability_caveats": [
+    "Historical 1-minute OHLCV in this repo spans roughly 2025-09 through 2026-06 (~9 months), not the 2-3 years the spec asks the backtest to target. Trade-count and per-year gates are evaluated honestly against this shorter window rather than extrapolated or padded.",
+    "No bid/ask spread data exists in the historical CSVs used here. The spread_pct <= 0.0005 filter is therefore marked UNAVAILABLE and is not enforced in this backtest (spread_available=False everywhere) rather than being approximated with a fabricated spread.",
+    "No FOMC/economic calendar exists in this repo. The FOMC-specific block is not implemented; the strategy's own 11:15 ET entry cutoff makes a 13:30-14:00 FOMC block moot for v1.0. Documented as a TODO."
+  ],
+  "backtest_after_costs": {
+    "closed_trades": 7,
+    "win_rate": 0.8571428571428571,
+    "profit_factor": 51.446043966080325,
+    "expectancy": 40.861295612523,
+    "average_winner": 48.61651154794345,
+    "average_loser": -5.669999999999714,
+    "max_drawdown": 0.0,
+    "sharpe": 2.0663315662731594,
+    "best_ticker": "NVDA",
+    "worst_ticker": "AMZN",
+    "best_time_of_day": 10,
+    "worst_time_of_day": 11,
+    "best_setup": "orb_pullback_continuation",
+    "worst_setup": "orb_pullback_continuation",
+    "losing_streak": 1,
+    "edge_by_rsi_bucket": {},
+    "edge_by_rvol_bucket": {
+      "(1.0, 1.5]": 101.21791907789597,
+      "(1.5, 2.0]": 22.3158077829672,
+      "(2.0, 3.0]": -5.669999999999714
+    },
+    "starting_equity": 10000.0,
+    "ending_equity": 10286.02906928766,
+    "total_return": 0.02860290692876606,
+    "cagr": 0.03845195726236539,
+    "best_trade": 141.26816756247723,
+    "worst_trade": -5.669999999999714,
+    "longest_winning_streak": 4,
+    "longest_losing_streak": 1,
+    "trades_by_exit_reason": [
+      {
+        "name": "STOP",
+        "closed_trades": 4,
+        "total_pnl": 201.7999139553991,
+        "expectancy": 50.44997848884977
+      },
+      {
+        "name": "TRAIL_EMA",
+        "closed_trades": 2,
+        "total_pnl": 89.89915533226164,
+        "expectancy": 44.94957766613082
+      },
+      {
+        "name": "TIME_STOP",
+        "closed_trades": 1,
+        "total_pnl": -5.669999999999714,
+        "expectancy": -5.669999999999714
+      }
+    ]
+  },
+  "backtest_before_costs": {
+    "closed_trades": 7,
+    "win_rate": 0.8571428571428571,
+    "profit_factor": 57.80254019196372,
+    "expectancy": 41.749867041094106,
+    "average_winner": 49.56567821460981,
+    "average_loser": -5.1450000000000955,
+    "max_drawdown": 0.0,
+    "sharpe": 2.085151320625015,
+    "best_ticker": "NVDA",
+    "worst_ticker": "AMZN",
+    "best_time_of_day": 10,
+    "worst_time_of_day": 11,
+    "best_setup": "orb_pullback_continuation",
+    "worst_setup": "orb_pullback_continuation",
+    "losing_streak": 1,
+    "edge_by_rsi_bucket": {},
+    "edge_by_rvol_bucket": {
+      "(1.0, 1.5]": 102.25541907789534,
+      "(1.5, 2.0]": 23.220807782967043,
+      "(2.0, 3.0]": -5.1450000000000955
+    }
+  },
+  "slippage_stress_2x": {
+    "closed_trades": 7,
+    "win_rate": 0.8571428571428571,
+    "profit_factor": 47.31019200126249,
+    "expectancy": 40.28986704109395,
+    "average_winner": 48.019844881276164,
+    "average_loser": -6.089999999999332,
+    "max_drawdown": 0.0,
+    "sharpe": 2.0539373600088693,
+    "best_ticker": "NVDA",
+    "worst_ticker": "AMZN",
+    "best_time_of_day": 10,
+    "worst_time_of_day": 11,
+    "best_setup": "orb_pullback_continuation",
+    "worst_setup": "orb_pullback_continuation",
+    "losing_streak": 1,
+    "edge_by_rsi_bucket": {},
+    "edge_by_rvol_bucket": {
+      "(1.0, 1.5]": 100.52791907789504,
+      "(1.5, 2.0]": 21.765807782966736,
+      "(2.0, 3.0]": -6.089999999999332
+    }
+  },
+  "cost_model": {
+    "commission_per_share": 0.005,
+    "default_slippage_per_share": 0.01,
+    "tsla_slippage_per_share": 0.02,
+    "slippage_stress_multiplier": 2.0
+  },
+  "risk_reward": {
+    "average_risk_per_trade": 46.70902532693443,
+    "average_reward_per_trade": null,
+    "average_r_multiple": 0.9300458293064052,
+    "reward_to_risk_ratio": null,
+    "loss_distribution": {
+      "min": 5.669999999999714,
+      "median": 5.669999999999714,
+      "mean": 5.669999999999714,
+      "max": 5.669999999999714
+    },
+    "win_distribution": {
+      "min": 8.147906698469807,
+      "median": 27.926575779514373,
+      "mean": 48.61651154794345,
+      "max": 141.26816756247723
+    },
+    "stop_loss_hit_rate": 0.7142857142857143,
+    "take_profit_hit_rate": 0.0,
+    "breakeven_win_rate": 0.10444583448675368,
+    "current_win_rate_clears_breakeven": true,
+    "payoff_profile": "profits rely on a small number of outsized winners",
+    "explanation": "profits rely on a small number of outsized winners. Observed win rate is 85.7% versus an estimated breakeven rate of 10.4%. Average R multiple is 0.93."
+  },
+  "drawdown": {
+    "max_drawdown": 0.0,
+    "average_drawdown": null,
+    "max_drawdown_duration": 0,
+    "average_recovery_time": null,
+    "worst_recovery_time": null,
+    "current_drawdown": 0.0,
+    "peak_timestamp": "2025-09-03T20:00:00+00:00",
+    "trough_timestamp": "2025-09-03T20:00:00+00:00",
+    "peak_equity": 10000.0,
+    "trough_equity": 10000.0,
+    "suggestions": [
+      "Keep this parameter unchanged until a larger out-of-sample sample identifies a repeatable drawdown cluster.",
+      "Keep this parameter unchanged until a larger out-of-sample sample identifies a repeatable drawdown cluster.",
+      "Keep this parameter unchanged until a larger out-of-sample sample identifies a repeatable drawdown cluster."
+    ],
+    "series": [
+      {
+        "timestamp": "2025-09-03T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-04T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-05T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-08T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-09T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-10T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-11T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-12T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-15T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-16T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-17T20:00:00+00:00",
+        "equity": 10000.0,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-18T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-19T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-22T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-23T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-24T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-25T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-26T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-29T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-09-30T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-01T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-02T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-03T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-06T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-07T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-08T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-09T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-10T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-13T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-14T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-15T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-16T20:05:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-17T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-20T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-21T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-22T20:05:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-23T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-24T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-27T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-28T20:05:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-29T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-30T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-10-31T20:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-03T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-04T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-05T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-06T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-07T21:05:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-10T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-11T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-12T21:05:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-13T21:05:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-14T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-17T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-18T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-19T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-20T21:05:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-21T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-24T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-25T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-26T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-11-28T19:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-01T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-02T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-03T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-04T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-05T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-08T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-09T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-10T21:05:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-11T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-12T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-15T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-16T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-17T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-18T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-19T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-22T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-23T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-24T18:10:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-26T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-29T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-30T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2025-12-31T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-02T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-05T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-06T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-07T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-08T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-09T21:00:00+00:00",
+        "equity": 10028.731484738946,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-12T21:05:00+00:00",
+        "equity": 10053.993657613317,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-13T21:00:00+00:00",
+        "equity": 10053.993657613317,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-14T21:00:00+00:00",
+        "equity": 10053.993657613317,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-15T21:00:00+00:00",
+        "equity": 10053.993657613317,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-16T21:00:00+00:00",
+        "equity": 10053.993657613317,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-20T21:00:00+00:00",
+        "equity": 10056.471564311787,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-21T21:00:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-22T21:00:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-23T21:00:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-26T21:00:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-27T21:00:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-28T21:05:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-29T21:00:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-01-30T21:05:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-02T21:00:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-03T21:05:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-04T21:00:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-05T21:00:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-06T21:05:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-09T21:00:00+00:00",
+        "equity": 10197.739731874264,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-10T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-11T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-12T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-13T21:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-17T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-18T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-19T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-20T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-23T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-24T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-25T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-26T21:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-02-27T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-02T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-03T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-04T21:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-05T21:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-06T21:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-09T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-10T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-11T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-12T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-13T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-16T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-17T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-18T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-19T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-20T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-23T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-24T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-25T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-26T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-27T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-30T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-03-31T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-01T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-02T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-06T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-07T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-08T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-09T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-10T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-13T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-14T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-15T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-16T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-17T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-20T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-21T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-22T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-23T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-24T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-27T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-28T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-29T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-04-30T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-01T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-04T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-05T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-06T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-07T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-08T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-11T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-12T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-13T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-14T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-15T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-18T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-19T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-20T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-21T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-22T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-26T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-27T20:00:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-28T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-05-29T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-06-01T20:05:00+00:00",
+        "equity": 10224.861398694346,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-06-02T20:05:00+00:00",
+        "equity": 10286.02906928766,
+        "drawdown": 0.0
+      },
+      {
+        "timestamp": "2026-06-03T20:05:00+00:00",
+        "equity": 10286.02906928766,
+        "drawdown": 0.0
+      }
+    ]
+  },
+  "monte_carlo": {
+    "runs": 1000,
+    "median_ending_equity": 10267.304985192895,
+    "p5_ending_equity": 10099.889044528809,
+    "p95_ending_equity": 10497.390333175119,
+    "probability_of_loss": 0.0,
+    "probability_of_breaching_max_drawdown": 0.0,
+    "worst_simulated_drawdown": 0.0022679999999998474,
+    "assessment": "unproven: fewer than 30 closed trades"
+  },
+  "walk_forward": {
+    "folds_run": 2,
+    "walk_forward_efficiency": 1.1274956956238273,
+    "oos_profitable_window_pct": 1.0,
+    "fold_details": [
+      {
+        "train_start": "2025-09-03",
+        "train_end": "2026-03-02",
+        "test_start": "2026-03-03",
+        "test_end": "2026-06-02",
+        "is_trades": 6,
+        "oos_trades": 4,
+        "is_avg_r": 0.8826804110760665,
+        "oos_avg_r": 0.7572860995280778,
+        "oos_total_pnl": 151.88297830673207
+      },
+      {
+        "train_start": "2025-12-03",
+        "train_end": "2026-06-02",
+        "test_start": "2026-06-03",
+        "test_end": "2026-06-03",
+        "is_trades": 4,
+        "oos_trades": 0,
+        "is_avg_r": 0.4606260023627576,
+        "oos_avg_r": null,
+        "oos_total_pnl": 0
+      }
+    ],
+    "notes": "ok"
+  },
+  "validation_gate_generic": {
+    "stage": "backtest",
+    "passes": false,
+    "status": "RESEARCH_ONLY",
+    "reasons": [
+      "needs at least 30 closed trades; got 7"
+    ],
+    "thresholds": {
+      "min_closed_trades": 30,
+      "min_profit_factor": 1.15,
+      "min_expectancy": 0.0,
+      "max_drawdown": 0.08,
+      "min_win_rate": 0.4
+    },
+    "metrics": {
+      "closed_trades": 7,
+      "profit_factor": 51.446043966080325,
+      "expectancy": 40.861295612523,
+      "max_drawdown": 0.0,
+      "win_rate": 0.8571428571428571
+    }
+  },
+  "validation_gate_orb_pbc": {
+    "status": "RESEARCH_ONLY",
+    "passes": false,
+    "criteria": [
+      {
+        "name": "min_trades",
+        "passed": false,
+        "available": true,
+        "detail": "7 closed trades vs required >= 100"
+      },
+      {
+        "name": "profit_factor_after_costs",
+        "passed": true,
+        "available": true,
+        "detail": "PF after costs = 51.446043966080325 vs required >= 1.25"
+      },
+      {
+        "name": "profit_factor_before_costs",
+        "passed": true,
+        "available": true,
+        "detail": "PF before costs = 57.80254019196372 vs required >= 1.35"
+      },
+      {
+        "name": "avg_r_multiple",
+        "passed": true,
+        "available": true,
+        "detail": "avg R = 0.9300458293064052 vs required >= 0.15"
+      },
+      {
+        "name": "expectancy_positive",
+        "passed": true,
+        "available": true,
+        "detail": "expectancy = 40.861295612523 vs required > 0.0"
+      },
+      {
+        "name": "max_drawdown",
+        "passed": true,
+        "available": true,
+        "detail": "max drawdown = 0.0 vs required <= 0.08"
+      },
+      {
+        "name": "longest_drawdown_months",
+        "passed": true,
+        "available": true,
+        "detail": "longest drawdown ~= 0.0 months vs required <= 4"
+      },
+      {
+        "name": "symbol_concentration",
+        "passed": false,
+        "available": true,
+        "detail": "best symbol NVDA share = 0.49389444196807514 vs required <= 0.4"
+      },
+      {
+        "name": "best_symbol_removed_pf",
+        "passed": true,
+        "available": true,
+        "detail": "PF with NVDA removed = 26.5310232319561 vs required >= 1.1"
+      },
+      {
+        "name": "monthly_profitability",
+        "passed": true,
+        "available": true,
+        "detail": "monthly profitable pct = 1.0 vs required >= 0.6"
+      },
+      {
+        "name": "walk_forward_efficiency",
+        "passed": true,
+        "available": true,
+        "detail": "WFE = 1.1274956956238273 vs required >= 0.5"
+      },
+      {
+        "name": "walk_forward_oos_profitable_windows",
+        "passed": true,
+        "available": true,
+        "detail": "OOS profitable windows = 1.0 vs required >= 0.6"
+      },
+      {
+        "name": "monte_carlo_drawdown_risk",
+        "passed": true,
+        "available": true,
+        "detail": "P(max DD > 10%) = 0.0 vs required <= 0.1"
+      },
+      {
+        "name": "monte_carlo_negative_return_risk",
+        "passed": true,
+        "available": true,
+        "detail": "P(negative return) = 0.0 vs required <= 0.2"
+      },
+      {
+        "name": "slippage_stress_pf",
+        "passed": true,
+        "available": true,
+        "detail": "2x slippage PF = 47.31019200126249 vs required >= 1.0"
+      },
+      {
+        "name": "win_rate_sanity",
+        "passed": true,
+        "available": true,
+        "detail": "win rate = 0.8571428571428571; below 35% suggests pullback logic may not be holding"
+      }
+    ],
+    "reject_reasons_triggered": [
+      "REJECT: trade frequency 9.9/year < 40/year (likely a data-window limitation, not a filter-loosening opportunity)"
+    ],
+    "avg_r_multiple": 0.9300458293064052,
+    "profit_factor_before_costs": 57.80254019196372,
+    "symbol_concentration": {
+      "by_symbol_pnl": {
+        "AMD": 28.73148473894694,
+        "AAPL": 25.262172874370254,
+        "META": 55.49767059331498,
+        "AMZN": 8.147906698469807,
+        "NVDA": 141.26816756247723,
+        "MSFT": 27.121666820081806
+      },
+      "best_symbol": "NVDA",
+      "max_symbol_profit_share": 0.49389444196807514,
+      "reason": null
+    },
+    "best_symbol_removed_pf": 26.5310232319561,
+    "monthly_profitability": {
+      "monthly_profitable_pct": 1.0,
+      "months": [
+        {
+          "month": "2025-09",
+          "pnl": 28.73148473894694
+        },
+        {
+          "month": "2026-01",
+          "pnl": 169.0082471353176
+        },
+        {
+          "month": "2026-02",
+          "pnl": 27.121666820081806
+        },
+        {
+          "month": "2026-06",
+          "pnl": 61.167670593314696
+        }
+      ],
+      "reason": null
+    },
+    "trades_per_year": 9.948443579766538,
+    "longest_drawdown_months_estimate": 0.0
+  },
+  "diagnostics": {
+    "breakout_confirmations": 126,
+    "pullbacks_validated": 98,
+    "state_machine_triggers_fired": 8,
+    "state_machine_invalidations": 126,
+    "signals_generated": 8,
+    "entries_opened": 7,
+    "exit_SCALE_HALF": 6,
+    "exit_TRAIL_EMA": 2,
+    "exit_STOP": 4,
+    "rejected_risk_max concurrent positions hit": 1,
+    "exit_TIME_STOP": 1
+  },
+  "trade_rows": [
+    {
+      "ticker": "AMD",
+      "entry_timestamp": "2025-09-18T10:45:00-04:00",
+      "exit_timestamp": "2025-09-18T15:05:00+00:00",
+      "entry_price": 153.92999999999998,
+      "exit_price": 154.29414355923683,
+      "position_size": 80,
+      "stop_loss": 153.30171288152636,
+      "take_profit": null,
+      "pnl_dollars": 28.73148473894694,
+      "pnl_percent": 0.002365643859136302,
+      "win_loss": "WIN",
+      "hold_time_minutes": 20.0,
+      "strategy_name": "orb_pullback_continuation_v1",
+      "setup_type": "orb_pullback_continuation",
+      "rsi": null,
+      "rvol": 1.695363269974656,
+      "exit_reason": "TRAIL_EMA",
+      "scaled": true,
+      "r_multiple": 0.5716233051369091,
+      "trade_id": 0
+    },
+    {
+      "ticker": "AAPL",
+      "entry_timestamp": "2026-01-12T11:10:00-05:00",
+      "exit_timestamp": "2026-01-12T16:40:00+00:00",
+      "entry_price": 259.76,
+      "exit_price": 260.0930801671996,
+      "position_size": 77,
+      "stop_loss": 259.12951854715106,
+      "take_profit": null,
+      "pnl_dollars": 25.262172874370254,
+      "pnl_percent": 0.0012822611918679764,
+      "win_loss": "WIN",
+      "hold_time_minutes": 30.0,
+      "strategy_name": "orb_pullback_continuation_v1",
+      "setup_type": "orb_pullback_continuation",
+      "rsi": null,
+      "rvol": 1.6289950547923973,
+      "exit_reason": "STOP",
+      "scaled": true,
+      "r_multiple": 0.5203645019486834,
+      "trade_id": 1
+    },
+    {
+      "ticker": "META",
+      "entry_timestamp": "2026-01-20T10:45:00-05:00",
+      "exit_timestamp": "2026-01-20T16:15:00+00:00",
+      "entry_price": 610.29,
+      "exit_price": 610.025,
+      "position_size": 21,
+      "stop_loss": 607.9134181719498,
+      "take_profit": null,
+      "pnl_dollars": -5.669999999999714,
+      "pnl_percent": -0.000434219797145597,
+      "win_loss": "LOSS",
+      "hold_time_minutes": 30.0,
+      "strategy_name": "orb_pullback_continuation_v1",
+      "setup_type": "orb_pullback_continuation",
+      "rsi": null,
+      "rvol": 2.0150393988476583,
+      "exit_reason": "TIME_STOP",
+      "scaled": false,
+      "r_multiple": -0.11360854350279591,
+      "trade_id": 2
+    },
+    {
+      "ticker": "AMZN",
+      "entry_timestamp": "2026-01-20T11:05:00-05:00",
+      "exit_timestamp": "2026-01-20T16:20:00+00:00",
+      "entry_price": 234.48999999999998,
+      "exit_price": 234.5908577258643,
+      "position_size": 85,
+      "stop_loss": 234.04552603098884,
+      "take_profit": null,
+      "pnl_dollars": 8.147906698469807,
+      "pnl_percent": 0.000430115253803275,
+      "win_loss": "WIN",
+      "hold_time_minutes": 15.0,
+      "strategy_name": "orb_pullback_continuation_v1",
+      "setup_type": "orb_pullback_continuation",
+      "rsi": null,
+      "rvol": 1.5288993131964579,
+      "exit_reason": "STOP",
+      "scaled": true,
+      "r_multiple": 0.2156655564725496,
+      "trade_id": 3
+    },
+    {
+      "ticker": "NVDA",
+      "entry_timestamp": "2026-01-21T10:20:00-05:00",
+      "exit_timestamp": "2026-01-21T16:35:00+00:00",
+      "entry_price": 180.32,
+      "exit_price": 181.5976861942565,
+      "position_size": 111,
+      "stop_loss": 179.96295754087257,
+      "take_profit": null,
+      "pnl_dollars": 141.26816756247723,
+      "pnl_percent": 0.007085659906036589,
+      "win_loss": "WIN",
+      "hold_time_minutes": 75.0,
+      "strategy_name": "orb_pullback_continuation_v1",
+      "setup_type": "orb_pullback_continuation",
+      "rsi": null,
+      "rvol": 1.3871422622740708,
+      "exit_reason": "STOP",
+      "scaled": true,
+      "r_multiple": 3.5645233829244196,
+      "trade_id": 4
+    },
+    {
+      "ticker": "MSFT",
+      "entry_timestamp": "2026-02-10T10:35:00-05:00",
+      "exit_timestamp": "2026-02-10T16:20:00+00:00",
+      "entry_price": 421.16999999999996,
+      "exit_price": 421.82075397190664,
+      "position_size": 42,
+      "stop_loss": 419.9686291419878,
+      "take_profit": null,
+      "pnl_dollars": 27.121666820081806,
+      "pnl_percent": 0.0015451099838703643,
+      "win_loss": "WIN",
+      "hold_time_minutes": 45.0,
+      "strategy_name": "orb_pullback_continuation_v1",
+      "setup_type": "orb_pullback_continuation",
+      "rsi": null,
+      "rvol": 1.7105461481978141,
+      "exit_reason": "STOP",
+      "scaled": true,
+      "r_multiple": 0.5375142634766334,
+      "trade_id": 5
+    },
+    {
+      "ticker": "META",
+      "entry_timestamp": "2026-06-02T10:50:00-04:00",
+      "exit_timestamp": "2026-06-02T15:55:00+00:00",
+      "entry_price": 604.51,
+      "exit_price": 606.6995596640469,
+      "position_size": 28,
+      "stop_loss": 602.7108806719061,
+      "take_profit": null,
+      "pnl_dollars": 61.167670593314696,
+      "pnl_percent": 0.0036220404361332263,
+      "win_loss": "WIN",
+      "hold_time_minutes": 65.0,
+      "strategy_name": "orb_pullback_continuation_v1",
+      "setup_type": "orb_pullback_continuation",
+      "rsi": null,
+      "rvol": 1.4001248653025664,
+      "exit_reason": "TRAIL_EMA",
+      "scaled": true,
+      "r_multiple": 1.2142383386884372,
+      "trade_id": 6
+    }
+  ],
+  "equity_curve": [
+    {
+      "timestamp": "2025-09-03T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-04T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-05T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-08T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-09T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-10T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-11T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-12T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-15T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-16T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-17T20:00:00+00:00",
+      "equity": 10000.0,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-18T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-19T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-22T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-23T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-24T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-25T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-26T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-29T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-09-30T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-01T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-02T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-03T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-06T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-07T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-08T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-09T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-10T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-13T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-14T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-15T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-16T20:05:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-17T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-20T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-21T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-22T20:05:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-23T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-24T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-27T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-28T20:05:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-29T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-30T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-10-31T20:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-03T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-04T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-05T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-06T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-07T21:05:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-10T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-11T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-12T21:05:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-13T21:05:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-14T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-17T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-18T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-19T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-20T21:05:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-21T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-24T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-25T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-26T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-11-28T19:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-01T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-02T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-03T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-04T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-05T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-08T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-09T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-10T21:05:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-11T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-12T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-15T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-16T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-17T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-18T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-19T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-22T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-23T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-24T18:10:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-26T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-29T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-30T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2025-12-31T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-02T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-05T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-06T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-07T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-08T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-09T21:00:00+00:00",
+      "equity": 10028.731484738946,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-12T21:05:00+00:00",
+      "equity": 10053.993657613317,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-13T21:00:00+00:00",
+      "equity": 10053.993657613317,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-14T21:00:00+00:00",
+      "equity": 10053.993657613317,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-15T21:00:00+00:00",
+      "equity": 10053.993657613317,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-16T21:00:00+00:00",
+      "equity": 10053.993657613317,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-20T21:00:00+00:00",
+      "equity": 10056.471564311787,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-21T21:00:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-22T21:00:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-23T21:00:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-26T21:00:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-27T21:00:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-28T21:05:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-29T21:00:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-01-30T21:05:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-02T21:00:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-03T21:05:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-04T21:00:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-05T21:00:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-06T21:05:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-09T21:00:00+00:00",
+      "equity": 10197.739731874264,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-10T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-11T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-12T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-13T21:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-17T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-18T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-19T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-20T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-23T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-24T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-25T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-26T21:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-02-27T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-02T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-03T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-04T21:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-05T21:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-06T21:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-09T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-10T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-11T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-12T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-13T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-16T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-17T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-18T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-19T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-20T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-23T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-24T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-25T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-26T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-27T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-30T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-03-31T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-01T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-02T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-06T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-07T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-08T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-09T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-10T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-13T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-14T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-15T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-16T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-17T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-20T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-21T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-22T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-23T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-24T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-27T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-28T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-29T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-04-30T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-01T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-04T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-05T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-06T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-07T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-08T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-11T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-12T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-13T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-14T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-15T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-18T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-19T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-20T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-21T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-22T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-26T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-27T20:00:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-28T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-05-29T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-06-01T20:05:00+00:00",
+      "equity": 10224.861398694346,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-06-02T20:05:00+00:00",
+      "equity": 10286.02906928766,
+      "drawdown": 0.0
+    },
+    {
+      "timestamp": "2026-06-03T20:05:00+00:00",
+      "equity": 10286.02906928766,
+      "drawdown": 0.0
+    }
+  ]
+}

@@ -19,4 +19,4 @@ jobs:
       - name: Compile
         run: python -m compileall .
       - name: Tests
-        run: pytest -q
+        run: PYTHONPATH=. pytest -q
