@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 import config
+from dashboard.commands import PROJECT_ROOT, command_env, python_command
 from dashboard.data_loader import (
     bot_status,
     candidate_trades_table,
@@ -33,22 +33,42 @@ def _metric(value, kind="number"):
     return f"{float(value):.2f}"
 
 
-def _run_command(label: str, command: list[str]) -> None:
+def _py_command(script: str, *args: str) -> list[str]:
+    return python_command(script, *args)
+
+
+def _run_command(label: str, command: list[str], *, refresh_on_success: bool = False) -> bool:
     with st.status(label, expanded=True) as status:
         try:
-            result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=600)
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=600,
+                cwd=PROJECT_ROOT,
+                env=command_env(),
+            )
             if result.returncode == 0:
                 status.update(label=f"{label} — done", state="complete")
                 if result.stdout.strip():
                     st.code(result.stdout[-4000:])
-            else:
-                status.update(label=f"{label} — failed", state="error")
-                st.error(result.stderr or result.stdout)
+                if refresh_on_success:
+                    st.success("Done — refreshing dashboard.")
+                    st.rerun()
+                return True
+
+            status.update(label=f"{label} — failed", state="error")
+            st.error(result.stderr.strip() or result.stdout.strip() or f"Exit code {result.returncode}")
+            return False
         except subprocess.TimeoutExpired:
             status.update(label=f"{label} — timed out", state="error")
+            st.error("Command timed out after 10 minutes.")
+            return False
         except Exception as exc:  # noqa: BLE001
             status.update(label=f"{label} — error", state="error")
             st.error(str(exc))
+            return False
 
 
 st.set_page_config(page_title="Trading Platform", page_icon="📈", layout="wide")
@@ -65,12 +85,11 @@ header_cols[4].metric("Live Trading", "DISABLED" if not status["live_enabled"] e
 if status["live_enabled"]:
     st.error("Live trading flag is enabled in config — this dashboard is intended for PAPER / SIGNAL_ONLY use.")
 
-action_cols = st.columns(6)
+action_cols = st.columns(4)
 if action_cols[0].button("Run Backtest", use_container_width=True):
     _run_command(
         "Running Research Lab backtest",
-        [
-            "python",
+        _py_command(
             "research_lab_runner.py",
             "--strategy",
             config.ORVWAP_STRATEGY_NAME,
@@ -78,33 +97,34 @@ if action_cols[0].button("Run Backtest", use_container_width=True):
             "2025-09-03",
             "--end-date",
             "2026-06-03",
-        ],
+        ),
+        refresh_on_success=True,
     )
 if action_cols[1].button("Train ML Brain", use_container_width=True):
     _run_command(
         "Training ML Trade Brain v1",
-        [
-            "python",
+        _py_command(
             "ml_brain_runner.py",
             "train",
             "--start-date",
             "2025-09-03",
             "--end-date",
             "2026-06-03",
-        ],
+        ),
+        refresh_on_success=True,
     )
 if action_cols[2].button("Evaluate Model", use_container_width=True):
     _run_command(
         "Evaluating ML model",
-        [
-            "python",
+        _py_command(
             "ml_brain_runner.py",
             "evaluate",
             "--start-date",
             "2025-09-03",
             "--end-date",
             "2026-06-03",
-        ],
+        ),
+        refresh_on_success=True,
     )
 if action_cols[3].button("Refresh Dashboard", use_container_width=True):
     st.rerun()
@@ -169,20 +189,21 @@ with tab_backtest:
             st.bar_chart(pd.DataFrame(symbol_rows).set_index("name")["total_pnl"])
 
         export_col1, export_col2 = st.columns(2)
-        if export_col1.download_button(
+        export_col1.download_button(
             "Export Results JSON",
             data=json.dumps(report, indent=2, default=str),
             file_name="research_report.json",
             mime="application/json",
-        ):
-            pass
-        if not trades.empty and export_col2.download_button(
-            "Export Trade Log CSV",
-            data=trades.to_csv(index=False),
-            file_name="trades.csv",
-            mime="text/csv",
-        ):
-            pass
+            use_container_width=True,
+        )
+        if not trades.empty:
+            export_col2.download_button(
+                "Export Trade Log CSV",
+                data=trades.to_csv(index=False),
+                file_name="trades.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
 with tab_ml:
     st.subheader("ML Trade Brain v1")
