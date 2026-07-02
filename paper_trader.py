@@ -297,6 +297,25 @@ def run_paper_trading_cycle(current_time=None):
             if not passes:
                 print(f"REJECT {symbol}: {details.get('rejection_reason')}")
                 continue
+
+            from ml_brain.integration import apply_ml_brain_filter, log_ml_prediction
+
+            ml_allowed, details = apply_ml_brain_filter(details, features=features, regime=regime)
+            log_ml_prediction(
+                {
+                    "ml_score": details.get("ml_score"),
+                    "decision": details.get("ml_decision"),
+                    "threshold": details.get("ml_threshold"),
+                    "model_version": details.get("ml_model_version"),
+                    "top_reasons": details.get("ml_top_reasons"),
+                    "error": details.get("ml_error"),
+                },
+                details,
+            )
+            if not ml_allowed:
+                log_signal("SIGNAL", details)
+                print(f"REJECT {symbol}: ML brain — score={details.get('ml_score')} threshold={details.get('ml_threshold')}")
+                continue
         else:
             passes, details = strategy.evaluate_entry(symbol, features, regime)
             if not passes:

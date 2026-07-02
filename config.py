@@ -359,6 +359,21 @@ ORB_PBC_SLIPPAGE_STRESS_PF_MIN = 1.0
 
 
 # =========================
+# ML TRADE BRAIN v1 (filter/scorer only — never executes orders)
+# =========================
+ML_BRAIN_ENABLED = os.getenv("ML_BRAIN_ENABLED", "false").lower() == "true"
+ML_MODEL_PATH = os.getenv("ML_MODEL_PATH", "models/ml_trade_brain_v1/model.joblib")
+ML_MODEL_DIR = os.getenv("ML_MODEL_DIR", "models/ml_trade_brain_v1")
+ML_THRESHOLD_DEFAULT = float(os.getenv("ML_THRESHOLD_DEFAULT", "0.60"))
+ML_MIN_TRADE_COUNT_FOR_MODEL = int(os.getenv("ML_MIN_TRADE_COUNT_FOR_MODEL", "50"))
+ML_FAIL_CLOSED = os.getenv("ML_FAIL_CLOSED", "true").lower() == "true"
+ML_PREDICTION_LOG_FILE = os.getenv("ML_PREDICTION_LOG_FILE", "logs/ml_predictions.csv")
+ML_LABELED_DATA_PATH = os.getenv("ML_LABELED_DATA_PATH", "logs/ml_labeled_candidates.csv")
+ML_RUNS_DIR = os.getenv("ML_RUNS_DIR", "research_results/ml_brain")
+ML_CANDIDATE_LOG_FILE = os.getenv("ML_CANDIDATE_LOG_FILE", "logs/ml_candidates.csv")
+
+
+# =========================
 # OPTIONAL SYMBOL CONTROLS
 # =========================
 SYMBOL_BLACKLIST = set()
