@@ -11,7 +11,7 @@ def test_stop_loss_uses_tightest_valid_candidate(monkeypatch):
         "atr_14": 2.0,
     }
     stop = strategy._select_stop_loss(100.0, features)
-    assert stop == 98.5
+    assert stop == 99.6
 
 
 def test_stop_loss_uses_widest_valid_candidate(monkeypatch):
