@@ -1,54 +1,30 @@
+"""Streamlit dashboard — PAPER-only trading platform with ML Brain visibility."""
+
+from __future__ import annotations
+
 import json
+import subprocess
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 import config
+from dashboard.data_loader import (
+    bot_status,
+    candidate_trades_table,
+    load_labeled_candidates,
+    load_ml_metadata,
+    load_ml_predictions,
+    load_research_report,
+    load_signal_log,
+    load_trade_log,
+    ml_filter_summary,
+)
 
 
-EXPERIMENT_SUMMARY = Path("research_results/experiments/experiment_summary.csv")
-RESEARCH_LAB_SUMMARY = Path("research_results/research_lab/research_lab_summary.csv")
-SIGNAL_LOG = Path("logs/orvwap_signals.csv")
-
-
-def load_latest_research_lab_report(summary_path: Path = RESEARCH_LAB_SUMMARY) -> dict | None:
-    if not summary_path.exists():
-        return None
-    summary = pd.read_csv(summary_path)
-    if summary.empty or "json_path" not in summary:
-        return None
-    latest = summary.sort_values("created_at").iloc[-1]
-    json_path = Path(str(latest["json_path"]))
-    if not json_path.exists():
-        return None
-    with open(json_path, "r", encoding="utf-8") as file:
-        return json.load(file)
-
-
-def warning_messages(report: dict | None, supabase_enabled: bool) -> list[str]:
-    warnings = []
-    if report is None:
-        warnings.append("No Research Lab report found yet.")
-        return warnings
-    backtest = report.get("backtest", {})
-    thresholds = report.get("validation_gate", {}).get("thresholds", {})
-    if int(backtest.get("closed_trades", 0) or 0) < int(thresholds.get("min_closed_trades", 30)):
-        warnings.append("Closed trades are below the validation threshold.")
-    if float(backtest.get("profit_factor", 0.0) or 0.0) < float(thresholds.get("min_profit_factor", 1.15)):
-        warnings.append("Profit factor fails the validation threshold.")
-    if float(backtest.get("expectancy", 0.0) or 0.0) <= float(thresholds.get("min_expectancy", 0.0)):
-        warnings.append("Expectancy is not positive enough for promotion.")
-    if float(backtest.get("max_drawdown", 0.0) or 0.0) > float(thresholds.get("max_drawdown", 0.08)):
-        warnings.append("Max drawdown exceeds the validation threshold.")
-    if not supabase_enabled:
-        warnings.append("Supabase is not configured or is disabled.")
-    warnings.append("Live trading is disabled, which is expected.")
-    return warnings
-
-
-def _metric_value(value, kind: str = "number") -> str:
-    if value is None:
+def _metric(value, kind="number"):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
         return "n/a"
     if kind == "money":
         return f"${float(value):,.2f}"
@@ -57,74 +33,220 @@ def _metric_value(value, kind: str = "number") -> str:
     return f"{float(value):.2f}"
 
 
-st.set_page_config(page_title="Trading Platform", layout="wide")
-st.title("Trading Platform")
+def _run_command(label: str, command: list[str]) -> None:
+    with st.status(label, expanded=True) as status:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=600)
+            if result.returncode == 0:
+                status.update(label=f"{label} — done", state="complete")
+                if result.stdout.strip():
+                    st.code(result.stdout[-4000:])
+            else:
+                status.update(label=f"{label} — failed", state="error")
+                st.error(result.stderr or result.stdout)
+        except subprocess.TimeoutExpired:
+            status.update(label=f"{label} — timed out", state="error")
+        except Exception as exc:  # noqa: BLE001
+            status.update(label=f"{label} — error", state="error")
+            st.error(str(exc))
 
-research_report = load_latest_research_lab_report()
-st.header("Research Lab")
-if research_report is None:
-    st.info("No Research Lab report found yet. Run research_lab_runner.py to create one.")
-else:
-    backtest = research_report.get("backtest", {})
-    monte_carlo = research_report.get("monte_carlo", {})
-    st.subheader(research_report.get("strategy_name", "Unknown strategy"))
-    status_col, recommendation_col = st.columns(2)
-    status_col.metric("Strategy Status", research_report.get("status", "UNKNOWN"))
-    recommendation_col.metric(
-        "Recommendation",
-        research_report.get("promotion_recommendation", {}).get("recommendation", "UNKNOWN"),
+
+st.set_page_config(page_title="Trading Platform", page_icon="📈", layout="wide")
+st.title("Trading Platform Dashboard")
+
+status = bot_status()
+header_cols = st.columns(5)
+header_cols[0].metric("Mode", "PAPER" if status["mode"] != "LIVE" else status["mode"])
+header_cols[1].metric("Strategy", status["strategy"])
+header_cols[2].metric("ML Brain", "ON" if status["ml_enabled"] else "OFF")
+header_cols[3].metric("Model", status["ml_model_version"])
+header_cols[4].metric("Live Trading", "DISABLED" if not status["live_enabled"] else "ENABLED")
+
+if status["live_enabled"]:
+    st.error("Live trading flag is enabled in config — this dashboard is intended for PAPER / SIGNAL_ONLY use.")
+
+action_cols = st.columns(6)
+if action_cols[0].button("Run Backtest", use_container_width=True):
+    _run_command(
+        "Running Research Lab backtest",
+        [
+            "python",
+            "research_lab_runner.py",
+            "--strategy",
+            config.ORVWAP_STRATEGY_NAME,
+            "--start-date",
+            "2025-09-03",
+            "--end-date",
+            "2026-06-03",
+        ],
     )
+if action_cols[1].button("Train ML Brain", use_container_width=True):
+    _run_command(
+        "Training ML Trade Brain v1",
+        [
+            "python",
+            "ml_brain_runner.py",
+            "train",
+            "--start-date",
+            "2025-09-03",
+            "--end-date",
+            "2026-06-03",
+        ],
+    )
+if action_cols[2].button("Evaluate Model", use_container_width=True):
+    _run_command(
+        "Evaluating ML model",
+        [
+            "python",
+            "ml_brain_runner.py",
+            "evaluate",
+            "--start-date",
+            "2025-09-03",
+            "--end-date",
+            "2026-06-03",
+        ],
+    )
+if action_cols[3].button("Refresh Dashboard", use_container_width=True):
+    st.rerun()
 
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-    col1.metric("Total Return", _metric_value(backtest.get("total_return"), "percent"))
-    col2.metric("Profit Factor", _metric_value(backtest.get("profit_factor")))
-    col3.metric("Expectancy", _metric_value(backtest.get("expectancy"), "money"))
-    col4.metric("Win Rate", _metric_value(backtest.get("win_rate"), "percent"))
-    col5.metric("Max Drawdown", _metric_value(backtest.get("max_drawdown"), "percent"))
-    col6.metric("MC Loss Prob", _metric_value(monte_carlo.get("probability_of_loss"), "percent"))
+report = load_research_report()
+metadata = load_ml_metadata()
+predictions = load_ml_predictions()
+signals = load_signal_log()
+trades = load_trade_log()
+labeled = load_labeled_candidates()
+ml_summary = ml_filter_summary(metadata, predictions)
+backtest = (report or {}).get("backtest", {})
+equity_curve = pd.DataFrame((report or {}).get("equity_curve", []))
+if not equity_curve.empty and "timestamp" in equity_curve.columns:
+    equity_curve["timestamp"] = pd.to_datetime(equity_curve["timestamp"], errors="coerce")
 
-    warnings = warning_messages(research_report, bool(config.SUPABASE_ENABLED))
-    for message in warnings:
-        st.warning(message)
+tab_overview, tab_backtest, tab_ml, tab_trades, tab_risk, tab_advanced = st.tabs(
+    ["Overview", "Backtest Results", "ML Brain", "Trades", "Risk & Safety", "Advanced JSON"]
+)
 
-    equity_curve = pd.DataFrame(research_report.get("equity_curve", []))
-    if not equity_curve.empty:
-        equity_curve["timestamp"] = pd.to_datetime(equity_curve["timestamp"])
-        st.subheader("Equity Curve")
+with tab_overview:
+    st.subheader("Performance Snapshot")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Starting Equity", _metric(backtest.get("starting_equity"), "money"))
+    c2.metric("Ending Equity", _metric(backtest.get("ending_equity"), "money"))
+    c3.metric("Total Return", _metric(backtest.get("total_return"), "percent"))
+    c4.metric("Closed Trades", backtest.get("closed_trades", "n/a"))
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Win Rate", _metric(backtest.get("win_rate"), "percent"))
+    c6.metric("Profit Factor", _metric(backtest.get("profit_factor")))
+    c7.metric("Expectancy", _metric(backtest.get("expectancy"), "money"))
+    c8.metric("Max Drawdown", _metric(backtest.get("max_drawdown"), "percent"))
+
+    st.subheader("ML Brain Snapshot")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Threshold", status["ml_threshold"])
+    m2.metric("Approved (log)", ml_summary.get("approved_trades", "n/a"))
+    m3.metric("Rejected (log)", ml_summary.get("rejected_trades", "n/a"))
+    m4.metric("PF After ML", _metric(ml_summary.get("pf_after")))
+
+    if not equity_curve.empty and "equity" in equity_curve.columns:
         st.line_chart(equity_curve.set_index("timestamp")["equity"])
-        st.subheader("Drawdown")
-        st.line_chart(equity_curve.set_index("timestamp")["drawdown"])
 
-    st.subheader("Trades by Symbol")
-    st.dataframe(pd.DataFrame(backtest.get("trades_by_symbol", [])), use_container_width=True)
+with tab_backtest:
+    if report is None:
+        st.info("No Research Lab report yet. Use **Run Backtest** to generate one.")
+    else:
+        st.json(
+            {
+                "status": report.get("status"),
+                "recommendation": report.get("promotion_recommendation"),
+                "backtest": report.get("backtest"),
+            }
+        )
+        if not equity_curve.empty:
+            st.subheader("Equity Curve")
+            st.line_chart(equity_curve.set_index("timestamp")["equity"])
+        symbol_rows = backtest.get("trades_by_symbol", [])
+        if symbol_rows:
+            st.subheader("Symbol Performance")
+            st.bar_chart(pd.DataFrame(symbol_rows).set_index("name")["total_pnl"])
 
-    st.subheader("Performance by Regime")
-    st.dataframe(
-        pd.DataFrame(research_report.get("market_regime", {}).get("performance_by_regime", [])),
-        use_container_width=True,
+        export_col1, export_col2 = st.columns(2)
+        if export_col1.download_button(
+            "Export Results JSON",
+            data=json.dumps(report, indent=2, default=str),
+            file_name="research_report.json",
+            mime="application/json",
+        ):
+            pass
+        if not trades.empty and export_col2.download_button(
+            "Export Trade Log CSV",
+            data=trades.to_csv(index=False),
+            file_name="trades.csv",
+            mime="text/csv",
+        ):
+            pass
+
+with tab_ml:
+    st.subheader("ML Trade Brain v1")
+    st.caption("Filter/scorer only — ML never submits orders. Risk engine remains final authority.")
+
+    ml1, ml2, ml3, ml4 = st.columns(4)
+    ml1.metric("Model Version", status["ml_model_version"])
+    ml2.metric("Fail Closed", "Yes" if status["ml_fail_closed"] else "No")
+    ml3.metric("Good Rejects", ml_summary.get("good_rejects", "n/a"))
+    ml4.metric("False Rejects", ml_summary.get("false_rejects", "n/a"))
+
+    ml5, ml6, ml7, ml8 = st.columns(4)
+    ml5.metric("PF Before ML", _metric(ml_summary.get("pf_before")))
+    ml6.metric("PF After ML", _metric(ml_summary.get("pf_after")))
+    ml7.metric("Expectancy Before", _metric(ml_summary.get("expectancy_before"), "money"))
+    ml8.metric("Expectancy After", _metric(ml_summary.get("expectancy_after"), "money"))
+
+    if metadata:
+        with st.expander("Latest training metrics"):
+            st.json(metadata.get("test_metrics", {}))
+
+    if not predictions.empty and "ml_score" in predictions.columns:
+        st.subheader("ML Score Distribution")
+        st.bar_chart(predictions["ml_score"].dropna())
+        st.subheader("Approved vs Rejected")
+        counts = predictions["ml_decision"].value_counts()
+        st.bar_chart(counts)
+    else:
+        st.info("No ML predictions logged yet. Enable ML_BRAIN_ENABLED and run paper cycles or backtests.")
+
+    if not labeled.empty:
+        st.subheader("Labeled Training Rows")
+        st.dataframe(labeled.tail(100), use_container_width=True)
+
+with tab_trades:
+    table = candidate_trades_table(signals, predictions, trades)
+    if table.empty:
+        st.info("No candidate trades in signal log yet.")
+    else:
+        st.dataframe(table, use_container_width=True)
+    if not trades.empty:
+        st.subheader("Executed Trades")
+        st.dataframe(trades.tail(100), use_container_width=True)
+
+with tab_risk:
+    st.subheader("Safety Status")
+    st.write(
+        {
+            "TRADING_MODE": config.TRADING_MODE,
+            "ENABLE_LIVE_TRADING": config.ENABLE_LIVE_TRADING,
+            "LIVE_ENABLED": config.LIVE_ENABLED,
+            "GLOBAL_KILL_SWITCH": config.GLOBAL_KILL_SWITCH,
+            "ML_BRAIN_ENABLED": config.ML_BRAIN_ENABLED,
+            "ML_FAIL_CLOSED": config.ML_FAIL_CLOSED,
+            "ALLOW_UNVALIDATED_STRATEGY": config.ALLOW_UNVALIDATED_STRATEGY,
+        }
     )
+    st.warning("Reset Paper State is not implemented in this repo — button intentionally omitted for safety.")
+    st.caption("Paper positions live in portfolio/positions.csv and broker reconciliation must stay in sync.")
 
-if RESEARCH_LAB_SUMMARY.exists():
-    st.subheader("Recent Research Lab Runs")
-    lab_summary = pd.read_csv(RESEARCH_LAB_SUMMARY)
-    st.dataframe(lab_summary.sort_values("created_at", ascending=False), use_container_width=True)
-
-if EXPERIMENT_SUMMARY.exists():
-    st.header("Walk-Forward Experiments")
-    experiments = pd.read_csv(EXPERIMENT_SUMMARY)
-    latest = experiments.iloc[-1]
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Latest Status", latest.get("status", "UNKNOWN"))
-    col2.metric("Profit Factor", f"{float(latest.get('profit_factor', 0.0)):.2f}")
-    col3.metric("Expectancy", f"${float(latest.get('expectancy', 0.0)):.2f}")
-    col4.metric("Closed Trades", int(latest.get("closed_trades", 0)))
-
-    st.subheader("Experiment History")
-    st.dataframe(experiments.sort_values("created_at", ascending=False), use_container_width=True)
-else:
-    st.info("No experiment summary found yet. Run walk_forward_runner.py to create one.")
-
-if SIGNAL_LOG.exists():
-    st.subheader("Recent OR/VWAP Signals")
-    signals = pd.read_csv(SIGNAL_LOG)
-    st.dataframe(signals.tail(100), use_container_width=True)
+with tab_advanced:
+    with st.expander("Research Lab JSON"):
+        st.json(report or {"message": "No report loaded"})
+    with st.expander("ML Metadata JSON"):
+        st.json(metadata or {"message": "No model trained"})
+    with st.expander("Raw ML Predictions"):
+        st.dataframe(predictions, use_container_width=True)

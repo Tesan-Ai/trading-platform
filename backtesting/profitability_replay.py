@@ -384,6 +384,31 @@ def _rank_candidates(
         if not passes:
             continue
 
+        if getattr(config, "ML_BRAIN_ENABLED", False):
+            from ml_brain.integration import apply_ml_brain_filter, log_ml_prediction
+
+            ml_allowed, details = apply_ml_brain_filter(details, features=features, regime=regime)
+            log_ml_prediction(
+                {
+                    "ml_score": details.get("ml_score"),
+                    "decision": details.get("ml_decision"),
+                    "threshold": details.get("ml_threshold"),
+                    "model_version": details.get("ml_model_version"),
+                    "top_reasons": details.get("ml_top_reasons"),
+                    "error": details.get("ml_error"),
+                },
+                details,
+            )
+            if hasattr(strategy, "build_signal_context"):
+                _log_signal_event(
+                    "ML_SIGNAL",
+                    details,
+                    account_equity=account_equity,
+                    signal_rows=signal_rows,
+                )
+            if not ml_allowed:
+                continue
+
         score = float(features.get("volume_ratio", features.get("relative_volume", 0.0)))
         if getattr(strategy, "name", "") == config.ORVWAP_STRATEGY_NAME:
             score = float(features.get("volume_ratio", 0.0))

@@ -114,6 +114,39 @@ def save_research_report(report: dict) -> None:
     _insert("research_reports", row)
 
 
+def save_ml_prediction(row: dict) -> None:
+    if not _enabled():
+        return
+    payload = {
+        "event_timestamp": _iso_or_none(row.get("timestamp")),
+        "strategy": row.get("strategy_name"),
+        "symbol": row.get("symbol"),
+        "ml_score": _numeric_or_none(row.get("ml_score")),
+        "ml_decision": row.get("ml_decision") or row.get("final_action"),
+        "ml_threshold": _numeric_or_none(row.get("ml_threshold")),
+        "model_version": row.get("model_version"),
+        "top_reasons": row.get("top_reasons"),
+        "error": row.get("error"),
+        "payload": _json_safe(row),
+    }
+    _insert("ml_predictions", payload)
+
+
+def save_model_run(report: dict) -> None:
+    if not _enabled():
+        return
+    row = {
+        "run_id": report.get("run_id") or report.get("trained_at"),
+        "model_version": report.get("model_version"),
+        "model_type": report.get("model_type"),
+        "status": report.get("status", "completed"),
+        "train_rows": report.get("train_rows"),
+        "test_rows": report.get("test_rows"),
+        "report": _json_safe(report),
+    }
+    _insert("model_runs", row)
+
+
 def _insert(table: str, row: dict) -> None:
     client = get_supabase_client()
     if client is None:
