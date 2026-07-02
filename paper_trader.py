@@ -4,16 +4,17 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 import config
-from brokers.base import OrderRequest
-from brokers.factory import get_broker
-from brokers.reconciliation import reconcile_positions
 from backtesting.profitability_replay import _is_entry_window_open, _position_size
+from database import get_observability_store
+from execution import PaperExecutionEngine
 from features.daily_context import build_daily_regime_map, daily_regime_for_date
 from features.feature_store import add_feature_columns, latest_features
 from features.session_features import add_session_feature_columns, latest_session_features
 from historical_data import get_data_client
 from logger import log_trade
-from portfolio_manager import add_position, close_position, load_open_positions
+from market import evaluate_orvwap_market_filter
+from portfolio_manager import load_open_positions
+from risk.orvwap_risk_engine import OrvwapRiskEngine
 from risk.risk_gate import RiskGate
 from strategies.factory import get_strategy
 
@@ -105,7 +106,6 @@ def _fetch_regime_history(symbol, days_back=320):
     return pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
 
 
-
 def _prepare_live_features(symbol, frame, strategy):
     if getattr(strategy, "uses_session_features", False):
         return add_session_feature_columns(frame)
@@ -120,43 +120,15 @@ def _latest_strategy_features(symbol, frame, strategy):
 
 def _resolve_live_regime(strategy, symbol_frames, trade_date):
     if getattr(strategy, "name", "") == config.ORVWAP_STRATEGY_NAME:
-        spy_frame = symbol_frames.get(config.ORVWAP_MARKET_FILTER_SYMBOL)
-        qqq_frame = symbol_frames.get(config.ORVWAP_TECH_FILTER_SYMBOL)
-        if spy_frame is None or spy_frame.empty:
-            return {
-                "regime": "UNKNOWN",
-                "trade_allowed": False,
-                "reason": "missing SPY market data",
-                "spy_above_vwap": False,
-                "qqq_above_vwap": False,
-            }
-
-        spy_features = latest_session_features(config.ORVWAP_MARKET_FILTER_SYMBOL, spy_frame)
-        qqq_features = (
-            latest_session_features(config.ORVWAP_TECH_FILTER_SYMBOL, qqq_frame)
-            if qqq_frame is not None and not qqq_frame.empty
-            else None
-        )
-        spy_above_vwap = bool(spy_features and spy_features.get("above_vwap"))
-        qqq_above_vwap = bool(qqq_features.get("above_vwap")) if qqq_features else True
-        spy_lower_lows = bool(spy_features and spy_features.get("lower_lows_below_vwap"))
-
-        if not spy_above_vwap or spy_lower_lows:
-            reason = "SPY below VWAP" if not spy_above_vwap else "SPY making lower lows below VWAP"
-            return {
-                "regime": "RISK_OFF",
-                "trade_allowed": False,
-                "reason": reason,
-                "spy_above_vwap": spy_above_vwap,
-                "qqq_above_vwap": qqq_above_vwap,
-            }
-
+        market_filter = evaluate_orvwap_market_filter(symbol_frames)
         return {
-            "regime": "BULL_INTRADAY",
-            "trade_allowed": True,
-            "reason": "SPY above VWAP",
-            "spy_above_vwap": spy_above_vwap,
-            "qqq_above_vwap": qqq_above_vwap,
+            "regime": market_filter["regime"],
+            "trade_allowed": market_filter["allowed"],
+            "reason": market_filter["reason"],
+            "spy_above_vwap": market_filter["spy_above_vwap"],
+            "qqq_above_vwap": market_filter["qqq_above_vwap"],
+            "spy_status": market_filter["spy_status"],
+            "qqq_status": market_filter["qqq_status"],
         }
 
     regime_symbol = getattr(config, "MARKET_REGIME_SYMBOL", "QQQ")
@@ -179,198 +151,185 @@ def run_paper_trading_cycle(current_time=None):
     strategy = get_strategy()
     default_symbols = list(config.ORVWAP_UNIVERSE) if getattr(strategy, "uses_session_features", False) else ["QQQ", "SPY"]
     symbols = list(getattr(config, "TRADE_SYMBOLS", default_symbols) or default_symbols)
+    store = get_observability_store()
+    bot_run_id = store.start_run(strategy.name, config.TRADING_MODE, symbols)
+    executor = PaperExecutionEngine(bot_run_id)
+    orvwap_risk_engine = OrvwapRiskEngine()
 
-    symbol_frames = _fetch_recent_bars(symbols)
-    if not symbol_frames:
-        print("No market data returned from Alpaca.")
-        return [], []
+    if getattr(config, "PAPER_ONLY", True) and config.TRADING_MODE != "PAPER":
+        message = f"Refusing to start: PAPER mode required, got {config.TRADING_MODE}"
+        store.log_risk_event(bot_run_id, message, severity="critical", event_type="startup_block", blocked_trade=True, rule_name="paper_only")
+        store.finish_run(bot_run_id, status="error", error_message=message)
+        raise RuntimeError(message)
 
-    featured = {
-        symbol: _prepare_live_features(symbol, frame, strategy)
-        for symbol, frame in symbol_frames.items()
-    }
-    current_prices = {
-        symbol: float(frame.iloc[-1]["close"])
-        for symbol, frame in featured.items()
-        if not frame.empty
-    }
+    try:
+        store.heartbeat(bot_run_id, "running", "fetching_market_data")
+        symbol_frames = _fetch_recent_bars(symbols)
+        if not symbol_frames:
+            print("No market data returned from Alpaca.")
+            store.log(bot_run_id, "warning", "market_data", "No market data returned from Alpaca.")
+            store.finish_run(bot_run_id, status="stopped")
+            return [], []
 
-    trade_date = current_time.date()
-    regime = _resolve_live_regime(strategy, symbol_frames, trade_date)
-
-    equity = _estimate_equity(current_prices)
-    risk_gate = RiskGate(float(config.INITIAL_CAPITAL), strategy=strategy)
-    risk_gate.update_equity(equity)
-
-    sold = []
-    bought = []
-    signal_only = config.TRADING_MODE == "SIGNAL_ONLY"
-    broker = None if signal_only else get_broker()
-
-    print(f"\nStrategy: {strategy.name}")
-    print(f"Mode: {config.TRADING_MODE}")
-    print(f"Regime: {regime.get('regime')} ({regime.get('reason')})")
-
-    open_positions = load_open_positions()
-    if broker is not None:
-        reconciliation = reconcile_positions(open_positions, broker.get_positions())
-        if not reconciliation.ok:
-            print("Entry blocked: broker reconciliation failed.")
-            print(f"Issues: {', '.join(reconciliation.issues)}")
-            return sold, bought
-
-    for position in open_positions:
-        symbol = position["symbol"]
-        if symbol not in featured:
-            continue
-
-        features = _latest_strategy_features(symbol, symbol_frames[symbol])
-        if features is None:
-            continue
-
-        entry_timestamp = _parse_stored_timestamp(position["entry_timestamp"])
-        holding_minutes = (current_time - entry_timestamp).total_seconds() / 60.0
-        stop_loss = float(position["entry_price"]) * (1 - float(config.SWING_STOP_LOSS_PERCENT))
-        take_profit = float(position["entry_price"]) * (1 + float(config.SWING_PROFIT_TARGET_PERCENT))
-        position_details = {
-            "entry_price": float(position["entry_price"]),
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
+        store.heartbeat(bot_run_id, "running", "preparing_features")
+        featured = {
+            symbol: _prepare_live_features(symbol, frame, strategy)
+            for symbol, frame in symbol_frames.items()
+        }
+        current_prices = {
+            symbol: float(frame.iloc[-1]["close"])
+            for symbol, frame in featured.items()
+            if not frame.empty
         }
 
-        should_exit, reason = strategy.evaluate_exit(
-            position_details,
-            features,
-            regime,
-            holding_minutes,
-            in_open_window=_is_entry_window_open(strategy, pd.Timestamp(current_time)),
-        )
+        trade_date = current_time.date()
+        regime = _resolve_live_regime(strategy, symbol_frames, trade_date)
 
-        if not should_exit:
-            continue
+        equity = _estimate_equity(current_prices)
+        risk_gate = RiskGate(float(config.INITIAL_CAPITAL), strategy=strategy)
+        risk_gate.update_equity(equity)
 
-        current_price = float(features["close"])
-        shares = int(position["shares"])
-        if broker is not None:
-            broker.close_position(symbol)
-        close_position(symbol)
-        pnl = round((current_price - float(position["entry_price"])) * shares, 2)
-        log_trade("SELL", symbol, current_price, shares, round(current_price * shares, 2), 0.0, pnl, reason)
-        sold.append(symbol)
-        print(f"SELL {symbol} @ {current_price:.2f} | PnL={pnl:.2f} | {reason}")
+        sold = []
+        bought = []
 
-    if not _is_entry_window_open(strategy, pd.Timestamp(current_time)):
-        return sold, bought
+        print(f"\nStrategy: {strategy.name}")
+        print(f"Mode: {config.TRADING_MODE}")
+        print(f"Regime: {regime.get('regime')} ({regime.get('reason')})")
 
-    allowed, reason = risk_gate.can_trade(current_time, equity, 0.0, {item["symbol"]: item for item in load_open_positions()})
-    if not allowed:
-        print(f"Entry blocked: {reason}")
-        return sold, bought
-
-    if not regime.get("trade_allowed", False):
-        print("Entry blocked: market filter failed.")
-        return sold, bought
-
-    open_symbols = {position["symbol"] for position in open_positions}
-    cash = equity - sum(
-        int(position["shares"]) * current_prices.get(position["symbol"], float(position["entry_price"]))
-        for position in open_positions
-    )
-
-    for symbol in symbols:
-        if symbol in open_symbols:
-            continue
-
-        if len(load_open_positions()) >= risk_gate._max_positions():
-            break
-
-        features = _latest_strategy_features(symbol, symbol_frames[symbol])
-        if features is None:
-            continue
-
-        if hasattr(strategy, "build_signal_context"):
-            details = strategy.build_signal_context(symbol, features, regime)
-            passes = bool(details.get("entry_approved"))
-            from signal_logger import log_signal
-
-            log_signal("SIGNAL", details)
-            if not passes:
-                print(f"REJECT {symbol}: {details.get('rejection_reason')}")
+        store.heartbeat(bot_run_id, "running", "checking_exits")
+        open_positions = load_open_positions()
+        for position in open_positions:
+            symbol = position["symbol"]
+            if symbol not in featured:
                 continue
 
-            from ml_brain.integration import apply_ml_brain_filter, log_ml_prediction
+            features = _latest_strategy_features(symbol, symbol_frames[symbol], strategy)
+            if features is None:
+                continue
 
-            ml_allowed, details = apply_ml_brain_filter(details, features=features, regime=regime)
-            log_ml_prediction(
-                {
-                    "ml_score": details.get("ml_score"),
-                    "decision": details.get("ml_decision"),
-                    "threshold": details.get("ml_threshold"),
-                    "model_version": details.get("ml_model_version"),
-                    "top_reasons": details.get("ml_top_reasons"),
-                    "error": details.get("ml_error"),
-                },
-                details,
+            entry_timestamp = _parse_stored_timestamp(position["entry_timestamp"])
+            holding_minutes = (current_time - entry_timestamp).total_seconds() / 60.0
+            stop_loss = float(position["entry_price"]) * (1 - float(config.SWING_STOP_LOSS_PERCENT))
+            take_profit = float(position["entry_price"]) * (1 + float(config.SWING_PROFIT_TARGET_PERCENT))
+            position_details = {
+                "entry_price": float(position["entry_price"]),
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+            }
+
+            should_exit, reason = strategy.evaluate_exit(
+                position_details,
+                features,
+                regime,
+                holding_minutes,
+                in_open_window=_is_entry_window_open(strategy, pd.Timestamp(current_time)),
             )
-            if not ml_allowed:
-                log_signal("SIGNAL", details)
-                print(f"REJECT {symbol}: ML brain — score={details.get('ml_score')} threshold={details.get('ml_threshold')}")
-                continue
-        else:
-            passes, details = strategy.evaluate_entry(symbol, features, regime)
-            if not passes:
+
+            if not should_exit:
                 continue
 
-        shares = _position_size(
-            cash,
-            equity,
-            float(details["entry_price"]),
-            details.get("risk_per_share"),
-            strategy,
+            current_price = float(features["close"])
+            shares = int(position["shares"])
+            order = executor.sell(position, current_price, reason, current_time)
+            log_trade("SELL", symbol, current_price, shares, round(current_price * shares, 2), 0.0, order["realized_pnl"], reason)
+            sold.append(symbol)
+            print(f"SELL {symbol} @ {current_price:.2f} | PnL={order['realized_pnl']:.2f} | {reason}")
+
+        if not _is_entry_window_open(strategy, pd.Timestamp(current_time)):
+            store.heartbeat(bot_run_id, "running", "outside_entry_window")
+            for symbol in symbols:
+                features = _latest_strategy_features(symbol, symbol_frames[symbol], strategy) if symbol in symbol_frames else None
+                if features and hasattr(strategy, "build_signal_context"):
+                    details = strategy.build_signal_context(symbol, features, regime)
+                    details["bot_run_id"] = bot_run_id
+                    details["signal_type"] = "hold"
+                    details["skip_reason"] = details.get("rejection_reason") or "outside entry window"
+                    from signal_logger import log_signal
+
+                    log_signal("HOLD", details)
+            store.finish_run(bot_run_id, status="stopped")
+            return sold, bought
+
+        allowed, reason = risk_gate.can_trade(current_time, equity, 0.0, {item["symbol"]: item for item in load_open_positions()})
+        if not allowed:
+            print(f"Entry blocked: {reason}")
+            store.log_risk_event(bot_run_id, reason, severity="warning", event_type="risk_block", rule_name="risk_gate")
+            store.finish_run(bot_run_id, status="stopped")
+            return sold, bought
+
+        if not regime.get("trade_allowed", False):
+            print("Entry blocked: market filter failed.")
+            store.log_risk_event(bot_run_id, regime.get("reason", "market filter failed"), severity="warning", event_type="market_filter_block", rule_name="market_filter")
+
+        open_symbols = {position["symbol"] for position in open_positions}
+        cash = equity - sum(
+            int(position["shares"]) * current_prices.get(position["symbol"], float(position["entry_price"]))
+            for position in open_positions
         )
-        if shares < 1:
-            continue
 
-        if signal_only:
-            from signal_logger import log_signal
+        store.heartbeat(bot_run_id, "running", "evaluating_entries")
+        from signal_logger import log_signal
 
+        for symbol in symbols:
+            if symbol in open_symbols:
+                continue
+
+            if len(load_open_positions()) >= risk_gate._max_positions():
+                store.log_risk_event(bot_run_id, "max positions hit", symbol=symbol, rule_name="max_positions")
+                break
+
+            features = _latest_strategy_features(symbol, symbol_frames[symbol], strategy) if symbol in symbol_frames else None
+            if features is None:
+                continue
+
+            if hasattr(strategy, "build_signal_context"):
+                details = strategy.build_signal_context(symbol, features, regime)
+                passes = bool(details.get("entry_approved"))
+                details["bot_run_id"] = bot_run_id
+                details["account_equity"] = equity
+                log_signal("BUY" if passes else "SKIP", details)
+                if not passes:
+                    print(f"REJECT {symbol}: {details.get('rejection_reason')}")
+                    if "filter" in str(details.get("rejection_reason", "")).lower() or "vwap" in str(details.get("rejection_reason", "")).lower():
+                        store.log_risk_event(bot_run_id, details.get("rejection_reason"), symbol=symbol, event_type="entry_rule_block", rule_name="entry_rules", raw_data=details)
+                    continue
+            else:
+                passes, details = strategy.evaluate_entry(symbol, features, regime)
+                if not passes:
+                    continue
+
+            risk_decision = orvwap_risk_engine.approve_entry(equity, cash, details, load_open_positions())
+            details.update(risk_decision.as_dict())
+            if not risk_decision.approved:
+                details["trade_executed"] = False
+                log_signal("SKIP", details)
+                store.log_risk_event(bot_run_id, risk_decision.reason, symbol=symbol, event_type="risk_block", rule_name="orvwap_risk_engine", raw_data=details)
+                print(f"RISK BLOCK {symbol}: {risk_decision.reason}")
+                continue
+
+            shares = risk_decision.final_quantity
             details["position_size"] = shares
-            details["account_equity"] = equity
+            details["trade_executed"] = True
             log_signal("ENTRY", details)
-            print(
-                f"SIGNAL {symbol} @ {details['entry_price']:.2f} | "
-                f"stop={details['stop_price']:.2f} | target={details['target_price']:.2f}"
+            executor.buy(symbol, details, shares, current_time)
+            log_trade(
+                "BUY",
+                symbol,
+                details["entry_price"],
+                shares,
+                round(shares * details["entry_price"], 2),
+                0.0,
+                0.0,
+                details["reason"],
             )
-            continue
+            risk_gate.record_open_trade(current_time)
+            bought.append(symbol)
+            cash -= shares * details["entry_price"]
+            print(f"BUY {symbol} @ {details['entry_price']:.2f} | shares={shares} | {details['reason']}")
 
-        if broker is not None:
-            broker.submit_order(
-                OrderRequest(
-                    symbol=symbol,
-                    side="buy",
-                    quantity=shares,
-                )
-            )
-
-        add_position(
-            symbol=symbol,
-            entry_price=details["entry_price"],
-            shares=shares,
-            entry_score=0.0,
-            current_time=current_time,
-        )
-        log_trade(
-            "BUY",
-            symbol,
-            details["entry_price"],
-            shares,
-            round(shares * details["entry_price"], 2),
-            0.0,
-            0.0,
-            details["reason"],
-        )
-        bought.append(symbol)
-        cash -= shares * details["entry_price"]
-        print(f"BUY {symbol} @ {details['entry_price']:.2f} | shares={shares} | {details['reason']}")
-
-    return sold, bought
+        store.finish_run(bot_run_id, status="stopped")
+        return sold, bought
+    except Exception as exc:
+        store.log(bot_run_id, "error", "paper_trader", str(exc))
+        store.finish_run(bot_run_id, status="error", error_message=str(exc))
+        raise

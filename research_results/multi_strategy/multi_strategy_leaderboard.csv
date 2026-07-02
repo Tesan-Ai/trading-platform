@@ -1,0 +1,5 @@
+rank,strategy_name,status,recommendation,score,closed_trades,total_return,profit_factor,expectancy,win_rate,max_drawdown,best_regimes,avoid_regimes,report_path
+1,momentum_breakout_v1,RESEARCH_ONLY,Keep RESEARCH_ONLY,-0.0993,1,-0.0002554999999998472,0.0,-2.5549999999998363,0.0,0.0002554999999998472,,BULL_TREND,research_results/research_lab/20260702_194555_research_lab_momentum_breakout_v1_6d9d04a1.json
+2,bull_day_trade_v1,RESEARCH_ONLY,Keep RESEARCH_ONLY,-0.4861,8,-0.001204499749999559,0.0,-1.5056246874999317,0.0,0.0012134678542718763,,BULL_TREND,research_results/research_lab/20260702_194555_research_lab_bull_day_trade_v1_e9a33b8a.json
+3,opening_range_vwap_momentum_v1,RESEARCH_ONLY,Keep RESEARCH_ONLY,-30.0,0,0.0,0.0,0.0,0.0,0.0,,,research_results/research_lab/20260702_194554_research_lab_opening_range_vwap_momentum_v1_d4084b5f.json
+4,daily_trend_v1,RESEARCH_ONLY,Keep RESEARCH_ONLY,-30.1115,0,8.386000000009517e-05,0.0,0.0,0.0,0.0009295270008904359,,,research_results/research_lab/20260702_194556_research_lab_daily_trend_v1_6e1cbd0c.json

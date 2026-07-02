@@ -1,7 +1,9 @@
 from collections import Counter, defaultdict
+import math
 
 import pandas as pd
 
+from analytics.strategy_diagnostics import build_strategy_diagnostics
 from analytics.trade_analytics import calculate_report, print_report
 
 
@@ -13,6 +15,14 @@ def build_orvwap_report(
 ) -> dict:
     base_report = calculate_report(trade_rows, equity_curve)
     report = dict(base_report)
+    report["trades"] = trade_rows
+    report["equity_curve"] = equity_curve
+    if equity_curve:
+        starting_equity = float(equity_curve[0]["equity"])
+        ending_equity = float(equity_curve[-1]["equity"])
+        report["starting_equity"] = starting_equity
+        report["ending_equity"] = ending_equity
+        report["total_return"] = (ending_equity - starting_equity) / starting_equity if starting_equity else 0.0
 
     if trade_rows:
         data = pd.DataFrame(trade_rows)
@@ -34,6 +44,7 @@ def build_orvwap_report(
     report["skipped_signals_by_reason"] = rejection_counts or _rejection_counts(signal_rows)
     report["accepted_signals"] = _count_event(signal_rows, "ENTRY")
     report["rejected_signals"] = sum(report["skipped_signals_by_reason"].values())
+    report["diagnostics"] = build_strategy_diagnostics(trade_rows, equity_curve, signal_rows)
     return report
 
 
@@ -64,6 +75,12 @@ def print_orvwap_report(report: dict) -> None:
         ):
             print(f"  {reason}: {count}")
 
+    candidates = report.get("diagnostics", {}).get("improvement_candidates", [])
+    if candidates:
+        print("\nStrategy improvement candidates:")
+        for candidate in candidates[:5]:
+            print(f"  [{candidate['severity']}] {candidate['finding']} {candidate['recommendation']}")
+
 
 def save_orvwap_report(report: dict, output_dir: str) -> str:
     import json
@@ -81,6 +98,8 @@ def _json_safe(value):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
     return value
 
 

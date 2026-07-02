@@ -18,6 +18,7 @@ ENABLE_LIVE_TRADING = os.getenv("ENABLE_LIVE_TRADING", "false").lower() == "true
 LIVE_ENABLED = os.getenv("LIVE_ENABLED", "false").lower() == "true"
 GLOBAL_KILL_SWITCH = os.getenv("GLOBAL_KILL_SWITCH", "false").lower() == "true"
 ALLOW_UNVALIDATED_STRATEGY = False
+PAPER_ONLY = True
 
 
 ETRADE_CONSUMER_KEY = os.getenv("ETRADE_CONSUMER_KEY")
@@ -163,7 +164,9 @@ MAX_VALIDATED_DRAWDOWN = 0.08
 # =========================
 # ACTIVE STRATEGY
 # =========================
-ACTIVE_STRATEGY = os.getenv("ACTIVE_STRATEGY", "momentum_scan_v1")
+ACTIVE_STRATEGY = os.getenv("ACTIVE_STRATEGY", "opening_range_vwap_momentum_v1")
+AUTO_STRATEGY_SELECTION = os.getenv("AUTO_STRATEGY_SELECTION", "true").lower() == "true"
+AUTO_STRATEGY_USE_SHADOW_LEADER = os.getenv("AUTO_STRATEGY_USE_SHADOW_LEADER", "false").lower() == "true"
 SCAN_MODE = os.getenv("SCAN_MODE", "market")
 TRADE_SYMBOLS = []
 MARKET_REGIME_SYMBOL = "QQQ"

@@ -4,6 +4,7 @@ from datetime import datetime
 
 import config
 from database.repositories import save_signal
+from database import get_observability_store
 
 SIGNAL_FIELDS = [
     "timestamp",
@@ -64,6 +65,7 @@ def log_signal(event_type: str, payload: dict, log_file: str | None = None) -> N
         writer.writerow(row)
 
     save_signal(event_type, row)
+    get_observability_store().log_signal(payload.get("bot_run_id"), event_type, payload)
 
 
 def summarize_rejections(log_file: str | None = None) -> dict[str, int]:

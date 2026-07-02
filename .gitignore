@@ -10,3 +10,4 @@ logs/orvwap_signals.csv
 research_results/experiments/
 research_results/research_lab/
 research_results_orvwap/
+*.sqlite3

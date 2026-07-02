@@ -1,11 +1,14 @@
 import os
 
-import sentry_sdk
+try:
+    import sentry_sdk
+except ImportError:  # pragma: no cover - optional runtime integration
+    sentry_sdk = None
 
 
 def init_sentry() -> None:
     dsn = os.getenv("SENTRY_DSN")
-    if not dsn:
+    if not dsn or sentry_sdk is None:
         return
     sentry_sdk.init(
         dsn=dsn,

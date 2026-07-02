@@ -52,6 +52,7 @@ class OpeningRangeVwapMomentumStrategy:
 
         context.update(
             {
+                "signal_type": "buy",
                 "reason": "opening range breakout above VWAP with volume confirmation",
                 "strategy_name": self.name,
                 "setup_type": "opening_range_vwap",
@@ -62,6 +63,8 @@ class OpeningRangeVwapMomentumStrategy:
                 "target_price": take_profit,
                 "risk_per_share": risk_per_share,
                 "risk_reward": risk_reward,
+                "passed_all_entry_rules": True,
+                "skip_reason": "",
             }
         )
         return True, context
@@ -72,13 +75,19 @@ class OpeningRangeVwapMomentumStrategy:
         if rejection is not None:
             context["entry_approved"] = False
             context["rejection_reason"] = rejection
+            context["skip_reason"] = rejection
+            context["signal_type"] = "skip"
+            context["passed_all_entry_rules"] = False
             return context
 
         entry_price = float(features["close"])
-        stop_loss = self._select_stop_loss(entry_price, features)
+        stop_loss, stop_method = self._select_stop_loss_details(entry_price, features)
         if stop_loss is None:
             context["entry_approved"] = False
             context["rejection_reason"] = "no valid stop loss"
+            context["skip_reason"] = "no valid stop loss"
+            context["signal_type"] = "skip"
+            context["passed_all_entry_rules"] = False
             return context
 
         risk_per_share = entry_price - stop_loss
@@ -89,17 +98,21 @@ class OpeningRangeVwapMomentumStrategy:
             {
                 "entry_approved": True,
                 "rejection_reason": "",
+                "signal_type": "buy",
                 "entry_price": entry_price,
                 "stop_price": stop_loss,
                 "target_price": take_profit,
                 "stop_loss": stop_loss,
                 "take_profit": take_profit,
+                "selected_stop_method": stop_method,
                 "risk_per_share": risk_per_share,
                 "target_r": target_r,
                 "reason": "opening range breakout above VWAP with volume confirmation",
                 "strategy_name": self.name,
                 "setup_type": "opening_range_vwap",
                 "risk_reward": (take_profit - entry_price) / risk_per_share,
+                "passed_all_entry_rules": True,
+                "skip_reason": "",
             }
         )
         return context
@@ -148,8 +161,12 @@ class OpeningRangeVwapMomentumStrategy:
             "ticker": symbol,
             "mode": config.TRADING_MODE,
             "price": float(features.get("close", 0.0)),
+            "signal_type": "hold",
+            "strategy_name": self.name,
+            "confidence": None,
             "opening_range_high": features.get("opening_range_high"),
             "opening_range_low": features.get("opening_range_low"),
+            "opening_range_midpoint": features.get("opening_range_midpoint"),
             "vwap": features.get("vwap"),
             "current_volume": features.get("volume"),
             "volume_avg_20": features.get("volume_avg_20"),
@@ -158,8 +175,12 @@ class OpeningRangeVwapMomentumStrategy:
             "distance_from_vwap": features.get("vwap_distance"),
             "distance_from_vwap_atr": features.get("distance_from_vwap_atr"),
             "spread": features.get("spread_percent"),
+            "spread_percentage": features.get("spread_percent"),
+            "price_vs_vwap": features.get("vwap_distance"),
             "entry_approved": False,
             "rejection_reason": "",
+            "skip_reason": "",
+            "passed_all_entry_rules": False,
             "entry_price": None,
             "stop_price": None,
             "target_price": None,
@@ -171,7 +192,17 @@ class OpeningRangeVwapMomentumStrategy:
             "strategy_version": self.name,
             "spy_above_vwap": regime.get("spy_above_vwap"),
             "qqq_above_vwap": regime.get("qqq_above_vwap"),
+            "market_filter_allowed": regime.get("trade_allowed", regime.get("allowed")),
+            "market_filter_status": regime.get("regime"),
             "market_filter_reason": regime.get("reason"),
+            "indicators_used": [
+                "opening_range_high",
+                "vwap",
+                "atr_14",
+                "volume_ratio",
+                "spread_percent",
+                "distance_from_vwap_atr",
+            ],
         }
 
     def _entry_rejection(self, symbol: str, features: dict, regime: dict) -> str | None:
@@ -218,29 +249,35 @@ class OpeningRangeVwapMomentumStrategy:
         return None
 
     def _select_stop_loss(self, entry_price: float, features: dict) -> float | None:
+        stop, _method = self._select_stop_loss_details(entry_price, features)
+        return stop
+
+    def _select_stop_loss_details(self, entry_price: float, features: dict) -> tuple[float | None, str | None]:
         candidates = []
 
         vwap = features.get("vwap")
         if vwap is not None:
-            candidates.append(float(vwap))
+            candidates.append(("vwap", float(vwap)))
 
         or_mid = features.get("opening_range_midpoint")
         if or_mid is not None:
-            candidates.append(float(or_mid))
+            candidates.append(("opening_range_midpoint", float(or_mid)))
 
-        candidates.append(entry_price * (1.0 - float(config.ORVWAP_STOP_PCT)))
+        candidates.append(("fixed_percent", entry_price * (1.0 - float(config.ORVWAP_STOP_PCT))))
 
         atr = features.get("atr_14")
         if atr is not None:
-            candidates.append(entry_price - (float(atr) * float(config.ORVWAP_ATR_STOP_MULTIPLE)))
+            candidates.append(("atr_multiple", entry_price - (float(atr) * float(config.ORVWAP_ATR_STOP_MULTIPLE))))
 
-        valid = [stop for stop in candidates if stop < entry_price]
+        valid = [(method, stop) for method, stop in candidates if stop < entry_price]
         if not valid:
-            return None
+            return None, None
 
         if getattr(config, "ORVWAP_STOP_SELECTION", "tightest") == "widest":
-            return min(valid)
-        return max(valid)
+            method, stop = min(valid, key=lambda item: item[1])
+            return stop, method
+        method, stop = max(valid, key=lambda item: item[1])
+        return stop, method
 
     def _passed_opening_range_breakout(self, features: dict) -> bool:
         or_high = features.get("opening_range_high")

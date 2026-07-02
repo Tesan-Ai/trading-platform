@@ -49,14 +49,15 @@ class ProfitabilityPortfolio:
             "entry_timestamp": timestamp,
             "stop_loss": entry_details["stop_loss"],
             "take_profit": entry_details["take_profit"],
+            "risk_per_share": entry_details.get(
+                "risk_per_share", fill_price - entry_details["stop_loss"]
+            ),
+            "selected_stop_method": entry_details.get("selected_stop_method"),
             "strategy_name": entry_details["strategy_name"],
             "setup_type": entry_details["setup_type"],
             "reason": entry_details["reason"]
         }
         self.positions[symbol] = position
-        position["risk_per_share"] = entry_details.get(
-            "risk_per_share", fill_price - entry_details["stop_loss"]
-        )
 
         self.trade_log.append({
             "timestamp": timestamp,
@@ -66,6 +67,8 @@ class ProfitabilityPortfolio:
             "shares": shares,
             "stop_loss": entry_details["stop_loss"],
             "take_profit": entry_details["take_profit"],
+            "risk_per_share": position["risk_per_share"],
+            "selected_stop_method": position.get("selected_stop_method"),
             "strategy_name": entry_details["strategy_name"],
             "setup_type": entry_details["setup_type"],
             "reason": entry_details["reason"],
@@ -76,6 +79,10 @@ class ProfitabilityPortfolio:
             "atr_percent": features.get("atr_percent"),
             "ema_trend": _ema_trend_label(features),
             "vwap_distance": features.get("vwap_distance"),
+            "distance_from_vwap_atr": features.get("distance_from_vwap_atr"),
+            "opening_range_high": features.get("opening_range_high"),
+            "opening_range_low": features.get("opening_range_low"),
+            "opening_range_midpoint": features.get("opening_range_midpoint"),
             "market_regime": regime.get("regime"),
             "sector": features.get("sector", "UNKNOWN"),
             "spread_percent": features.get("spread_percent"),

@@ -25,6 +25,14 @@ def load_research_report() -> dict | None:
         return json.load(file)
 
 
+def load_multi_strategy_report() -> dict | None:
+    path = Path("research_results/multi_strategy/latest_multi_strategy_report.json")
+    if not path.exists():
+        return None
+    with open(path, "r", encoding="utf-8") as file:
+        return json.load(file)
+
+
 def load_ml_metadata() -> dict:
     path = Path(config.ML_MODEL_DIR) / "metadata.json"
     if not path.exists():
@@ -136,6 +144,8 @@ def bot_status() -> dict:
         "mode": config.TRADING_MODE,
         "live_enabled": bool(config.ENABLE_LIVE_TRADING or config.LIVE_ENABLED),
         "strategy": config.ACTIVE_STRATEGY,
+        "auto_strategy_selection": bool(config.AUTO_STRATEGY_SELECTION),
+        "auto_strategy_use_shadow_leader": bool(config.AUTO_STRATEGY_USE_SHADOW_LEADER),
         "ml_enabled": bool(config.ML_BRAIN_ENABLED),
         "ml_threshold": config.ML_THRESHOLD_DEFAULT,
         "ml_model_version": metadata.get("model_version", "not trained"),

@@ -15,6 +15,7 @@ from dashboard.data_loader import (
     candidate_trades_table,
     load_labeled_candidates,
     load_ml_metadata,
+    load_multi_strategy_report,
     load_ml_predictions,
     load_research_report,
     load_signal_log,
@@ -85,7 +86,7 @@ header_cols[4].metric("Live Trading", "DISABLED" if not status["live_enabled"] e
 if status["live_enabled"]:
     st.error("Live trading flag is enabled in config — this dashboard is intended for PAPER / SIGNAL_ONLY use.")
 
-action_cols = st.columns(4)
+action_cols = st.columns(5)
 if action_cols[0].button("Run Backtest", use_container_width=True):
     _run_command(
         "Running Research Lab backtest",
@@ -126,10 +127,23 @@ if action_cols[2].button("Evaluate Model", use_container_width=True):
         ),
         refresh_on_success=True,
     )
-if action_cols[3].button("Refresh Dashboard", use_container_width=True):
+if action_cols[3].button("Run Multi-Strategy", use_container_width=True):
+    _run_command(
+        "Running multi-strategy research comparison",
+        _py_command(
+            "multi_strategy_research_runner.py",
+            "--start-date",
+            "2025-09-03",
+            "--end-date",
+            "2026-06-03",
+        ),
+        refresh_on_success=True,
+    )
+if action_cols[4].button("Refresh Dashboard", use_container_width=True):
     st.rerun()
 
 report = load_research_report()
+multi_strategy = load_multi_strategy_report()
 metadata = load_ml_metadata()
 predictions = load_ml_predictions()
 signals = load_signal_log()
@@ -141,8 +155,8 @@ equity_curve = pd.DataFrame((report or {}).get("equity_curve", []))
 if not equity_curve.empty and "timestamp" in equity_curve.columns:
     equity_curve["timestamp"] = pd.to_datetime(equity_curve["timestamp"], errors="coerce")
 
-tab_overview, tab_backtest, tab_ml, tab_trades, tab_risk, tab_advanced = st.tabs(
-    ["Overview", "Backtest Results", "ML Brain", "Trades", "Risk & Safety", "Advanced JSON"]
+tab_overview, tab_backtest, tab_allocator, tab_ml, tab_trades, tab_risk, tab_advanced = st.tabs(
+    ["Overview", "Backtest Results", "Strategy Allocator", "ML Brain", "Trades", "Risk & Safety", "Advanced JSON"]
 )
 
 with tab_overview:
@@ -205,6 +219,49 @@ with tab_backtest:
                 use_container_width=True,
             )
 
+with tab_allocator:
+    st.subheader("Multi-Strategy Research")
+    if multi_strategy is None:
+        st.info("No multi-strategy comparison yet. Use **Run Multi-Strategy** to generate one.")
+    else:
+        allocator = multi_strategy.get("strategy_allocator", {})
+        summary = multi_strategy.get("summary", {})
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("Allocator Mode", allocator.get("mode", "n/a"))
+        a2.metric("Top Strategy", summary.get("top_strategy", "n/a"))
+        a3.metric("Strategies Tested", summary.get("strategies_tested", "n/a"))
+        a4.metric("Strategies Skipped", summary.get("strategies_skipped", "n/a"))
+        st.caption(allocator.get("reason", "Research-only guidance."))
+
+        leaderboard = pd.DataFrame(multi_strategy.get("leaderboard", []))
+        if not leaderboard.empty:
+            st.subheader("Leaderboard")
+            display_cols = [
+                column
+                for column in [
+                    "rank",
+                    "strategy_name",
+                    "score",
+                    "closed_trades",
+                    "profit_factor",
+                    "expectancy",
+                    "total_return",
+                    "max_drawdown",
+                    "recommendation",
+                ]
+                if column in leaderboard.columns
+            ]
+            st.dataframe(leaderboard[display_cols], use_container_width=True)
+
+        by_regime = pd.DataFrame(multi_strategy.get("best_by_regime", []))
+        if not by_regime.empty:
+            st.subheader("Best Strategy By Regime")
+            st.dataframe(by_regime[["regime", "recommended_strategy", "reason"]], use_container_width=True)
+
+        if multi_strategy.get("skipped"):
+            with st.expander("Skipped Strategies"):
+                st.json(multi_strategy["skipped"])
+
 with tab_ml:
     st.subheader("ML Trade Brain v1")
     st.caption("Filter/scorer only — ML never submits orders. Risk engine remains final authority.")
@@ -253,6 +310,8 @@ with tab_risk:
     st.write(
         {
             "TRADING_MODE": config.TRADING_MODE,
+            "AUTO_STRATEGY_SELECTION": config.AUTO_STRATEGY_SELECTION,
+            "AUTO_STRATEGY_USE_SHADOW_LEADER": config.AUTO_STRATEGY_USE_SHADOW_LEADER,
             "ENABLE_LIVE_TRADING": config.ENABLE_LIVE_TRADING,
             "LIVE_ENABLED": config.LIVE_ENABLED,
             "GLOBAL_KILL_SWITCH": config.GLOBAL_KILL_SWITCH,
@@ -267,6 +326,8 @@ with tab_risk:
 with tab_advanced:
     with st.expander("Research Lab JSON"):
         st.json(report or {"message": "No report loaded"})
+    with st.expander("Multi-Strategy JSON"):
+        st.json(multi_strategy or {"message": "No multi-strategy report loaded"})
     with st.expander("ML Metadata JSON"):
         st.json(metadata or {"message": "No model trained"})
     with st.expander("Raw ML Predictions"):

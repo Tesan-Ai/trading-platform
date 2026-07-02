@@ -2,6 +2,9 @@ import csv
 import os
 from datetime import datetime
 
+import config
+from database import get_observability_store
+
 TRADE_LOG_FILE = "data/trades.csv"
 
 
@@ -40,6 +43,26 @@ def log_trade(action, symbol, price, shares, position_value, score, pnl=0.0, rea
             round(float(pnl), 2),
             reason
         ])
+
+    side = "buy" if action.upper() == "BUY" else "sell"
+    get_observability_store().log_trade(
+        None,
+        {
+            "timestamp": timestamp,
+            "symbol": symbol,
+            "side": side,
+            "quantity": int(shares),
+            "entry_price": float(price) if side == "buy" else None,
+            "exit_price": float(price) if side == "sell" else None,
+            "realized_pnl": float(pnl),
+            "order_status": "paper_filled",
+            "strategy_name": config.ACTIVE_STRATEGY,
+            "trading_mode": config.TRADING_MODE,
+            "entry_reason": reason if side == "buy" else None,
+            "exit_reason": reason if side == "sell" else None,
+            "is_open": side == "buy",
+        },
+    )
 
 
 def load_trade_log():

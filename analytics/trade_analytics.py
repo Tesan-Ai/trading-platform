@@ -1,7 +1,10 @@
 import math
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 
 import pandas as pd
+
+EASTERN = ZoneInfo("America/New_York")
 
 
 def build_trade_rows(trade_log: list[dict]) -> list[dict]:
@@ -22,6 +25,16 @@ def build_trade_rows(trade_log: list[dict]) -> list[dict]:
         shares = int(trade["shares"])
         pnl_dollars = (exit_price - entry_price) * shares
         pnl_percent = (exit_price - entry_price) / entry_price
+        risk_per_share = entry.get("risk_per_share")
+        risk_dollars = float(risk_per_share) * shares if risk_per_share is not None else None
+        r_multiple = pnl_dollars / risk_dollars if risk_dollars and risk_dollars > 0 else None
+        opening_range_high = entry.get("opening_range_high")
+        opening_range_low = entry.get("opening_range_low")
+        opening_range_size = (
+            float(opening_range_high) - float(opening_range_low)
+            if opening_range_high is not None and opening_range_low is not None
+            else None
+        )
         hold_minutes = (
             trade["timestamp"] - entry["timestamp"]
         ).total_seconds() / 60.0
@@ -35,6 +48,9 @@ def build_trade_rows(trade_log: list[dict]) -> list[dict]:
             "position_size": shares,
             "stop_loss": entry.get("stop_loss"),
             "take_profit": entry.get("take_profit"),
+            "risk_per_share": risk_per_share,
+            "risk_dollars": risk_dollars,
+            "r_multiple": r_multiple,
             "pnl_dollars": pnl_dollars,
             "pnl_percent": pnl_percent,
             "win_loss": "WIN" if pnl_dollars > 0 else "LOSS",
@@ -46,11 +62,19 @@ def build_trade_rows(trade_log: list[dict]) -> list[dict]:
             "atr": entry.get("atr_14"),
             "ema_trend": entry.get("ema_trend"),
             "vwap_position": entry.get("vwap_distance"),
+            "distance_from_vwap_atr": entry.get("distance_from_vwap_atr"),
+            "opening_range_high": opening_range_high,
+            "opening_range_low": opening_range_low,
+            "opening_range_midpoint": entry.get("opening_range_midpoint"),
+            "opening_range_size": opening_range_size,
             "spy_trend": entry.get("market_regime"),
+            "spy_above_vwap_at_entry": entry.get("spy_above_vwap_at_entry"),
+            "qqq_above_vwap_at_entry": entry.get("qqq_above_vwap_at_entry"),
             "vix_regime": entry.get("vix_regime"),
             "sector": entry.get("sector", "UNKNOWN"),
             "spread": entry.get("spread_percent"),
             "volume": entry.get("volume"),
+            "selected_stop_method": entry.get("selected_stop_method"),
             "entry_reason": entry.get("reason"),
             "exit_reason": trade.get("reason")
         })
@@ -107,7 +131,14 @@ def calculate_report(trade_rows: list[dict], equity_curve: list[dict]) -> dict:
         "worst_setup": _worst_group(data, "setup_type"),
         "losing_streak": _max_losing_streak(data),
         "edge_by_rsi_bucket": _bucket_edge(data, "rsi", [40, 50, 60, 70, 80]),
-        "edge_by_rvol_bucket": _bucket_edge(data, "rvol", [1, 1.5, 2, 3])
+        "edge_by_rvol_bucket": _bucket_edge(data, "rvol", [1, 1.5, 2, 3]),
+        "average_r": _mean_or_zero(data, "r_multiple"),
+        "average_hold_time": _mean_or_zero(data, "hold_time_minutes"),
+        "median_hold_time": _median_or_zero(data, "hold_time_minutes"),
+        "largest_winner": float(wins["pnl_dollars"].max()) if not wins.empty else 0.0,
+        "largest_loser": float(losses["pnl_dollars"].min()) if not losses.empty else 0.0,
+        "best_trade": _trade_extreme(data, "pnl_dollars", best=True),
+        "worst_trade": _trade_extreme(data, "pnl_dollars", best=False),
     }
 
 
@@ -132,6 +163,13 @@ def print_report(report: dict) -> None:
     print(f'Best time of day:    {report["best_time_of_day"]}')
     print(f'Worst time of day:   {report["worst_time_of_day"]}')
     print(f'Max losing streak:   {report["losing_streak"]}')
+    print(f'Average R:           {report.get("average_r", 0.0):.2f}')
+    if report.get("best_trade"):
+        best = report["best_trade"]
+        print(f'Best trade:          {best.get("ticker")} ${best.get("pnl_dollars", 0.0):.2f}')
+    if report.get("worst_trade"):
+        worst = report["worst_trade"]
+        print(f'Worst trade:         {worst.get("ticker")} ${worst.get("pnl_dollars", 0.0):.2f}')
 
 
 def _best_group(data: pd.DataFrame, column: str):
@@ -146,13 +184,19 @@ def _worst_group(data: pd.DataFrame, column: str):
 
 def _best_time_bucket(data: pd.DataFrame):
     data = data.copy()
-    data["time_bucket"] = data["entry_timestamp"].dt.hour
+    timestamps = data["entry_timestamp"]
+    if getattr(timestamps.dt, "tz", None) is not None:
+        timestamps = timestamps.dt.tz_convert(EASTERN)
+    data["time_bucket"] = timestamps.dt.hour
     return _best_group(data, "time_bucket")
 
 
 def _worst_time_bucket(data: pd.DataFrame):
     data = data.copy()
-    data["time_bucket"] = data["entry_timestamp"].dt.hour
+    timestamps = data["entry_timestamp"]
+    if getattr(timestamps.dt, "tz", None) is not None:
+        timestamps = timestamps.dt.tz_convert(EASTERN)
+    data["time_bucket"] = timestamps.dt.hour
     return _worst_group(data, "time_bucket")
 
 
@@ -191,3 +235,42 @@ def _bucket_edge(data: pd.DataFrame, column: str, bins: list[float]) -> dict:
         return {}
     filtered["bucket"] = pd.cut(filtered[column], bins=bins)
     return filtered.groupby("bucket", observed=False)["pnl_dollars"].mean().to_dict()
+
+
+def _mean_or_zero(data: pd.DataFrame, column: str) -> float:
+    if column not in data.columns:
+        return 0.0
+    filtered = data.dropna(subset=[column])
+    if filtered.empty:
+        return 0.0
+    return float(filtered[column].mean())
+
+
+def _median_or_zero(data: pd.DataFrame, column: str) -> float:
+    if column not in data.columns:
+        return 0.0
+    filtered = data.dropna(subset=[column])
+    if filtered.empty:
+        return 0.0
+    return float(filtered[column].median())
+
+
+def _trade_extreme(data: pd.DataFrame, column: str, best: bool) -> dict | None:
+    if data.empty or column not in data.columns:
+        return None
+    index = data[column].idxmax() if best else data[column].idxmin()
+    row = data.loc[index]
+    keys = [
+        "ticker",
+        "entry_timestamp",
+        "exit_timestamp",
+        "entry_price",
+        "exit_price",
+        "position_size",
+        "pnl_dollars",
+        "r_multiple",
+        "hold_time_minutes",
+        "entry_reason",
+        "exit_reason",
+    ]
+    return {key: row.get(key) for key in keys}

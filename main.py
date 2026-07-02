@@ -8,6 +8,7 @@ init_sentry()
 
 print("E*TRADE bot")
 print(f"Strategy: {config.ACTIVE_STRATEGY}")
+print(f"Auto strategy selection: {config.AUTO_STRATEGY_SELECTION}")
 if config.ACTIVE_STRATEGY in {config.ORVWAP_STRATEGY_NAME, "daily_trend_v1"}:
     symbols = list(getattr(config, "TRADE_SYMBOLS", []) or config.ORVWAP_UNIVERSE)
     print(f"Symbols: {', '.join(symbols)}")
