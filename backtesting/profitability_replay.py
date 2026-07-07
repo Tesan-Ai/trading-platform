@@ -144,6 +144,7 @@ def run_profitability_replay(
     start_date: str | None = None,
     end_date: str | None = None,
     strategy=None,
+    daily_allowed_symbols: dict | None = None,
 ) -> dict:
     symbol_data = load_symbol_data(symbols, data_dir, start_date, end_date)
     strategy = strategy or get_strategy()
@@ -247,6 +248,7 @@ def run_profitability_replay(
             latest_regime,
             signal_rows,
             portfolio.equity(current_prices),
+            daily_allowed_symbols=daily_allowed_symbols,
         )
         for candidate in candidates:
             symbol = candidate["symbol"]
@@ -356,10 +358,17 @@ def _rank_candidates(
     regime,
     signal_rows=None,
     account_equity=None,
+    daily_allowed_symbols=None,
 ) -> list[dict]:
     candidates = []
+    trade_date = current_timestamp.to_pydatetime().astimezone(EASTERN).date()
+    allowed_today = None
+    if daily_allowed_symbols is not None:
+        allowed_today = set(daily_allowed_symbols.get(trade_date, []))
 
     for symbol, data_frame in featured_symbol_data.items():
+        if allowed_today is not None and symbol not in allowed_today:
+            continue
         trade_symbols = getattr(config, "ORVWAP_TRADE_SYMBOLS", None)
         if getattr(strategy, "name", "") == config.ORVWAP_STRATEGY_NAME and trade_symbols and symbol not in trade_symbols:
             continue

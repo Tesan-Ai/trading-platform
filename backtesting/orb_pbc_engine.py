@@ -97,6 +97,7 @@ def run_orb_pbc_backtest(
     include_costs: bool = True,
     slippage_multiplier: float = 1.0,
     correlated_pairs=None,
+    daily_allowed_symbols: dict | None = None,
 ) -> EngineResult:
     market_filter_symbols = market_filter_symbols or list(config.ORB_PBC_MARKET_FILTER_SYMBOLS)
     starting_equity = float(starting_equity if starting_equity is not None else config.ORB_PBC_EQUITY)
@@ -175,7 +176,13 @@ def run_orb_pbc_backtest(
     for session_date in session_dates:
         risk_gate.update_equity(equity)
         book = DailyBook(start_equity=equity)
-        day_states = {symbol: SymbolDayState() for symbol in trade_symbols}
+        day_trade_symbols = list(trade_symbols)
+        if daily_allowed_symbols is not None:
+            allowed = daily_allowed_symbols.get(session_date)
+            if allowed is not None:
+                allowed_set = set(allowed)
+                day_trade_symbols = [symbol for symbol in trade_symbols if symbol in allowed_set]
+        day_states = {symbol: SymbolDayState() for symbol in day_trade_symbols}
         open_positions: dict[str, dict] = {}
 
         day_timestamps = [ts for ts in all_timestamps if ts.tz_convert(EASTERN).date() == session_date]
@@ -222,7 +229,7 @@ def run_orb_pbc_backtest(
             equity = starting_equity + sum(row["pnl_dollars"] for row in trade_rows)
 
             # 2) Advance state machines / look for new entries.
-            for symbol in trade_symbols:
+            for symbol in day_trade_symbols:
                 if symbol in open_positions:
                     continue
                 row = _row_asof(feature_frames.get(symbol), timestamp)

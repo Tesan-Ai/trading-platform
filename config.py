@@ -377,6 +377,18 @@ ML_CANDIDATE_LOG_FILE = os.getenv("ML_CANDIDATE_LOG_FILE", "logs/ml_candidates.c
 
 
 # =========================
+# UNIVERSE SCANNER ("stocks in play" daily selection — research mode)
+# =========================
+SCANNER_TOP_N = int(os.getenv("SCANNER_TOP_N", "10"))
+SCANNER_MIN_PRICE = float(os.getenv("SCANNER_MIN_PRICE", "5.0"))
+SCANNER_MIN_OPENING_RVOL = float(os.getenv("SCANNER_MIN_OPENING_RVOL", "1.5"))
+SCANNER_OR_MINUTES = int(os.getenv("SCANNER_OR_MINUTES", "5"))
+SCANNER_RVOL_LOOKBACK_DAYS = int(os.getenv("SCANNER_RVOL_LOOKBACK_DAYS", "14"))
+SCANNER_MIN_ATR_D_PCT = float(os.getenv("SCANNER_MIN_ATR_D_PCT", "0.015"))
+SCANNER_SELECTION_LOG_DIR = os.getenv("SCANNER_SELECTION_LOG_DIR", "research_results/scanner")
+
+
+# =========================
 # OPTIONAL SYMBOL CONTROLS
 # =========================
 SYMBOL_BLACKLIST = set()

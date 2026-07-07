@@ -1,7 +1,7 @@
 import argparse
 
 from historical_data import fetch_and_save_bars
-from watchlist import ETF_RESEARCH_UNIVERSE, WATCHLIST
+from watchlist import ETF_RESEARCH_UNIVERSE, LEGACY_WATCHLIST, SCANNER_UNIVERSE, WATCHLIST
 
 
 DEFAULT_MARKET_SYMBOLS = ["SPY", "QQQ"]
@@ -41,6 +41,9 @@ def parse_universe(universe):
     if universe == "legacy":
         return WATCHLIST
 
+    if universe == "scanner":
+        return SCANNER_UNIVERSE
+
     return []
 
 
@@ -51,7 +54,7 @@ def parse_args():
     parser.add_argument("--symbols", default="", help="Comma-separated symbols")
     parser.add_argument("--include-watchlist", action="store_true")
     parser.add_argument("--include-market", action="store_true")
-    parser.add_argument("--universe", choices=["none", "etf", "legacy"], default="none")
+    parser.add_argument("--universe", choices=["none", "etf", "legacy", "scanner"], default="none")
     parser.add_argument("--output-dir", default="historical_data")
     parser.add_argument("--feed", default="sip")
     parser.add_argument("--batch-size", type=int, default=50)

@@ -24,12 +24,59 @@ def main() -> None:
     parser.add_argument("--data-dir", default="historical_data")
     parser.add_argument("--output-dir", default="research_results/research_lab")
     parser.add_argument("--monte-carlo-runs", type=int, default=1000)
+    parser.add_argument(
+        "--universe",
+        choices=["fixed", "scanner"],
+        default="fixed",
+        help="fixed = use configured symbol list; scanner = daily 'stocks in play' selection",
+    )
+    parser.add_argument("--scanner-top-n", type=int, default=None)
     args = parser.parse_args()
 
     _configure_run(args)
     strategy = get_strategy(args.strategy)
-    trade_symbols = _trade_symbols(args, strategy)
     market_filters = _market_filters(args, strategy)
+    daily_allowed_symbols = None
+    scanner_meta = None
+
+    if args.universe == "scanner":
+        from strategies.universe_scanner import (
+            ScannerConfig,
+            build_scanner_backtest_context,
+            save_daily_selections,
+            scanner_config_from_env,
+        )
+
+        scanner_cfg = scanner_config_from_env()
+        if args.scanner_top_n is not None:
+            scanner_cfg = ScannerConfig(
+                top_n=args.scanner_top_n,
+                min_price=scanner_cfg.min_price,
+                min_opening_rvol=scanner_cfg.min_opening_rvol,
+                opening_range_minutes=scanner_cfg.opening_range_minutes,
+                rvol_lookback_days=scanner_cfg.rvol_lookback_days,
+                min_atr_d_pct=scanner_cfg.min_atr_d_pct,
+            )
+        scanner_meta = build_scanner_backtest_context(
+            data_dir=args.data_dir,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            cfg=scanner_cfg,
+            market_filter_symbols=market_filters,
+        )
+        trade_symbols = scanner_meta["loaded_symbols"]
+        daily_allowed_symbols = scanner_meta["daily_selections"]
+        save_daily_selections(
+            daily_allowed_symbols,
+            getattr(config, "SCANNER_SELECTION_LOG_DIR", "research_results/scanner"),
+            f"research_lab_{args.strategy}",
+        )
+        if args.strategy == config.ORVWAP_STRATEGY_NAME:
+            config.ORVWAP_TRADE_SYMBOLS = trade_symbols
+            config.TRADE_SYMBOLS = trade_symbols
+    else:
+        trade_symbols = _trade_symbols(args, strategy)
+
     replay_symbols = list(dict.fromkeys(trade_symbols + market_filters))
 
     result = run_profitability_replay(
@@ -39,6 +86,7 @@ def main() -> None:
         start_date=args.start_date,
         end_date=args.end_date,
         strategy=strategy,
+        daily_allowed_symbols=daily_allowed_symbols,
     )
     trade_rows = result.get("trade_rows", [])
     equity_curve = result.get("portfolio").equity_curve if result.get("portfolio") else []
@@ -55,6 +103,14 @@ def main() -> None:
         base_report=result.get("report", {}),
         monte_carlo_runs=args.monte_carlo_runs,
     )
+    if scanner_meta:
+        report["scanner"] = {
+            "mode": "scanner",
+            "selection_days": scanner_meta["selection_days"],
+            "avg_symbols_per_day": scanner_meta["avg_symbols_per_day"],
+            "loaded_symbols": scanner_meta["loaded_symbols"],
+            "top_n": scanner_meta["config"].top_n,
+        }
     paths = save_research_lab_report(report, args.output_dir)
     save_research_report(report)
     _print_summary(report, paths)
@@ -94,6 +150,12 @@ def _print_summary(report: dict, paths: dict) -> None:
     print("\nRESEARCH LAB SUMMARY")
     print("====================")
     print(f"Strategy:          {report['strategy_name']}")
+    if report.get("scanner"):
+        scanner = report["scanner"]
+        print(
+            f"Universe mode:     scanner ({scanner.get('selection_days')} days, "
+            f"{scanner.get('avg_symbols_per_day', 0):.1f} symbols/day avg)"
+        )
     print(f"Status:            {report['status']}")
     print(f"Recommendation:    {report['promotion_recommendation']['recommendation']}")
     print(f"Closed trades:     {backtest.get('closed_trades')}")

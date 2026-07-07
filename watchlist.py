@@ -82,3 +82,19 @@ LEGACY_WATCHLIST = [
 
 
 WATCHLIST = ETF_RESEARCH_UNIVERSE
+
+
+# Liquid US equities for "stocks in play" daily scanner (research mode).
+# Backtests skip symbols without a CSV in historical_data/.
+SCANNER_UNIVERSE = [
+    "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "GOOG", "META", "TSLA", "BRK.B", "UNH",
+    "JPM", "V", "XOM", "LLY", "JNJ", "WMT", "MA", "PG", "AVGO", "HD",
+    "CVX", "MRK", "COST", "ABBV", "PEP", "KO", "ADBE", "CRM", "MCD", "CSCO",
+    "ACN", "TMO", "NFLX", "AMD", "LIN", "ABT", "DHR", "WFC", "DIS", "VZ",
+    "INTC", "CMCSA", "TXN", "PM", "NEE", "COP", "ORCL", "QCOM", "IBM", "AMAT",
+    "CAT", "GE", "UNP", "HON", "LOW", "BA", "SBUX", "GS", "MS", "BLK",
+    "ISRG", "PLTR", "SOFI", "COIN", "HOOD", "RIVN", "LCID", "NIO", "BABA", "PDD",
+    "MU", "LRCX", "KLAC", "SNPS", "CDNS", "PANW", "CRWD", "FTNT", "NOW", "SNOW",
+    "UBER", "LYFT", "ABNB", "DASH", "SQ", "PYPL", "SHOP", "MELI", "SE", "NET",
+    "SMCI", "ARM", "MRVL", "ON", "TSM", "ASML", "DE", "RTX", "LMT", "NKE",
+]
