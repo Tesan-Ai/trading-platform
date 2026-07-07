@@ -1,0 +1,347 @@
+================================================================================
+FABLE AGENT PROMPT — E*TRADE BOT PROFITABILITY & PLATFORM OVERHAUL
+================================================================================
+Copy everything below this line and paste it to Fable (or any deep-research /
+implementation agent). Repo path: /Users/TesanJoe/Desktop/etrade-bot
+
+================================================================================
+MISSION
+================================================================================
+
+We have a Python intraday trading platform (backtest → validate → paper → gated
+live). We are NOT profitable yet. We need you to:
+
+1. Make a concrete, evidence-based plan to become profitable with this bot
+2. Redesign statistics/reporting so a non-quant partner can understand results
+   in 30 seconds
+3. Greatly improve ML Trade Brain v1 (currently weak — tiny dataset, sklearn only)
+4. Advise whether LLM integration (OpenAI / Claude) should pick strategies or
+   filter trades — and whether that saves us from months of manual testing
+5. Research Twitter/X, Instagram, Reddit, YouTube, trading forums, quant blogs,
+   and academic/industry sources for what actually works for intraday ORB/VWAP
+   systems like ours — then map findings to actionable changes in THIS codebase
+
+DO NOT hand-wave. Every recommendation must tie to: what to change, where in the
+repo, how to measure success, and what could go wrong.
+
+================================================================================
+WHAT THIS CODEBASE IS (CURRENT STATE)
+================================================================================
+
+Language: Python
+Broker/data: Alpaca (paper trading + historical minute bars)
+Live trading: DISABLED by design (multiple gates must pass first)
+Dashboard: Streamlit (streamlit_app.py) with Read Me, Overview, Backtest, ML,
+Trades, Safety tabs
+No OpenAI/Claude integration exists today — zero references in codebase
+
+ARCHITECTURE (promotion pipeline):
+  Research backtest → Walk-forward validation → Paper trading → Reconciliation
+  → (explicitly gated) Live
+
+KEY DIRECTORIES:
+  strategies/          — entry/exit logic (6 registered strategies)
+  backtesting/         — profitability_replay.py (main), orb_pbc_engine.py
+  ml_brain/            — sklearn filter (LogisticRegression / RandomForest)
+  analytics/           — reports, Monte Carlo, scorecards
+  validation/          — pass/fail gates for research vs paper vs live
+  historical_data/     — local minute CSVs (~9 months for most symbols)
+  research_results/    — backtest + ML evaluation outputs
+  streamlit_app.py     — UI dashboard
+
+ACTIVE STRATEGY (one at a time via ACTIVE_STRATEGY in .env):
+  opening_range_vwap_momentum_v1  ← primary focus for paper trading
+
+OTHER STRATEGIES IN CODEBASE:
+  orb_pullback_continuation_v1    ← RESEARCH ONLY, dedicated engine
+  momentum_breakout_v1            ← tested 128 ETF configs, ALL failed (PF ~0.08)
+  daily_trend_v1                  ← swing, paper-capable
+  bull_day_trade_v1               ← legacy research
+  momentum_scan_v1                ← legacy scanner path (ai_model.py rules, NOT LLM)
+
+IMPORTANT CLARIFICATION:
+  - ONE strategy runs at a time (ACTIVE_STRATEGY env var)
+  - ML Brain filters individual TRADES (approve/reject), NOT which strategy runs
+  - ai_model.py is rule-based technical scoring, NOT ChatGPT / NOT Claude
+
+================================================================================
+PRIMARY STRATEGY — Opening Range VWAP Momentum
+================================================================================
+
+Logic: Buy mega-caps breaking above 5-min opening range, above VWAP, with volume,
+while SPY/QQQ are aligned.
+
+  Opening range:  09:30–09:35 ET
+  Entry window:   09:35–10:30 ET
+  Force flat:     15:55 ET
+  Symbols:        NVDA, TSLA, AMD, AAPL, META, MSFT, AMZN
+  Target:         2R default (configurable)
+  Stops:          VWAP, OR midpoint, % stop, ATR stop (widest wins)
+
+Run backtest:
+  python research_lab_runner.py \
+    --strategy opening_range_vwap_momentum_v1 \
+    --start-date 2025-09-03 --end-date 2026-06-03
+
+================================================================================
+RESEARCH STRATEGY — ORB Pullback Continuation (NOT live-ready)
+================================================================================
+
+Logic: 15-min OR breakout → wait for pullback → enter on break of pullback high.
+Never buys breakout candle. Scale-out at 1R, trail runner.
+
+Latest baseline backtest (2023-01-01 to 2026-06-03, NVDA/META/AMD/TSLA):
+  Closed trades:     30 (gate requires 100 — FAIL)
+  Win rate:          76.7%
+  Profit factor:     4.50 (after costs)
+  Expectancy:        +$32.54/trade
+  Max drawdown:      1.0%
+  Total return:      +9.76% over ~3 years
+  Walk-forward eff:  45.2% (gate requires 50% — FAIL)
+  Trades/year:       ~9 (gate requires 40 — FAIL)
+
+Verdict: Promising per-trade stats but insufficient sample size. RESEARCH_ONLY.
+Report: research_results/orb_pbc_v1/20260701_214334_orb_pbc_v1_202dcfdd.md
+
+================================================================================
+WHAT FAILED
+================================================================================
+
+ETF Momentum Breakout sweep (128 configs, 9 months, 18 ETFs):
+  Positive expectancy configs: 0
+  Profit factor > 1: 0
+  Best win rate: ~18%
+  Do NOT pursue this strategy form on ETFs without fundamental redesign.
+
+================================================================================
+ML TRADE BRAIN v1 — CURRENT STATE (NEEDS MAJOR IMPROVEMENT)
+================================================================================
+
+Location: ml_brain/
+Model: scikit-learn LogisticRegression or RandomForestClassifier
+Role: Filter/scorer ONLY — never places orders
+
+Training flow:
+  1. collect_labeled_candidates() walks historical minute data
+  2. Strategy-approved setups get labeled:
+       label=1 if target hit before stop on forward bars
+       label=0 if stop hit before target
+  3. 17 numeric features (VWAP distance, OR levels, RVOL, regime, time, returns)
+  4. Time-based 70/30 train/test split (no shuffle)
+  5. Saved to models/ml_trade_brain_v1/model.joblib
+
+Train command:
+  python ml_brain_runner.py train \
+    --start-date 2025-09-03 --end-date 2026-06-03 --model-type logistic
+
+CURRENT MODEL STATS (metadata.json):
+  Train rows: 46
+  Test rows:  20
+  Train PF before ML: 0.64 → after ML: 3.24  (looks great BUT overfit risk)
+  Test PF after ML:   0.0 (only 1 approved trade on test set)
+  ML_BRAIN_ENABLED:   false (default pass-through)
+
+KNOWN ML GAPS (from ml_brain/README.md):
+  - spread_pct often missing in historical CSVs
+  - Very small training set (need 50+ minimum, ideally 500+)
+  - No live feature drift monitoring
+  - No calibration / threshold optimization
+  - No comparison of model types beyond logistic vs random forest
+  - No integration with walk-forward at ML layer
+
+WE WANT YOU TO PROPOSE:
+  - Better labeling (meta-labeling, triple barrier, purged k-fold)
+  - Better features (microstructure, relative strength vs SPY, gap context)
+  - Better models (XGBoost, calibrated probabilities, ensemble)
+  - Minimum viable dataset size and how to grow it
+  - Proper out-of-sample evaluation framework
+  - Whether ML should stay trade-filter-only or also rank multiple candidates
+  - Concrete code changes with file paths
+
+================================================================================
+VALIDATION GATES (what "passing" means)
+================================================================================
+
+Backtest gate (validation/performance_gate.py):
+  ≥ 30 closed trades, PF ≥ 1.15, expectancy > 0, max DD ≤ 8%, win rate ≥ 40%
+
+Paper-to-live gate (config.py):
+  ≥ 100 paper trades, PF ≥ 1.25, expectancy > 0, max DD ≤ 8%
+
+ORB-PBC additional gates:
+  ≥ 100 trades, PF ≥ 1.25 after costs, WFE ≥ 50%, ~40 trades/year, Monte Carlo stress
+
+================================================================================
+UI / STATISTICS — CURRENT PAIN POINTS
+================================================================================
+
+We added a Streamlit dashboard (streamlit_app.py) with styled metrics, but:
+  - Backtest results were confusing (raw JSON) — partially fixed
+  - Partner still struggles to understand: "Are we making money? Is this real?"
+  - No single "health score" or traffic-light summary
+  - No comparison view: strategy A vs B vs ML on vs ML off
+  - No paper trading live P&L vs backtest P&L side-by-side
+  - No plain-English explanation of each metric for non-quants
+
+WE WANT:
+  - One-screen answer: "Are we profitable? Yes/No/Not enough data"
+  - Every number with a one-line plain-English definition
+  - Before/after ML comparison always visible
+  - Strategy comparison table (all 6 strategies, last backtest result each)
+  - Confidence indicators (sample size warnings, overfit warnings)
+  - Exportable 1-page PDF or markdown summary for partner meetings
+
+================================================================================
+LLM INTEGRATION — KEY QUESTION FOR YOU
+================================================================================
+
+Should we add OpenAI or Claude API to:
+
+  A) Pick WHICH STRATEGY to run each day (OR/VWAP vs ORB-PBC vs daily trend)?
+  B) Filter individual trades (replace or augment ML Brain)?
+  C) Add context only (news, earnings, FOMC, sentiment) as an extra gate?
+  D) Explain results / research assistant only (safest)?
+
+Our concern: Without LLM, does finding profitability require months of manual
+parameter sweeps and strategy iteration?
+
+Please research:
+  - What prop firms / retail quants actually use LLMs for in systematic trading
+  - Whether LLM strategy selection is backtestable or inherently un reproducible
+  - Latency/cost at intraday frequency (09:35–10:30 entry window)
+  - Recommended architecture if we add LLM (where in pipeline, fail-closed rules)
+  - Whether LLM saves time vs more data + better ML + walk-forward
+
+If recommending LLM integration, specify:
+  - Exact API (OpenAI vs Claude vs both)
+  - Prompt templates
+  - Where in code (new module path)
+  - How to backtest or A/B test LLM decisions
+  - Cost estimate per trading day
+
+================================================================================
+EXTERNAL RESEARCH REQUEST
+================================================================================
+
+Search and synthesize findings from:
+  - Twitter/X: #daytrading #ORB #VWAP #openingrange #algotrading #quant
+  - Reddit: r/daytrading, r/algotrading, r/options, r/stocks
+  - YouTube: opening range breakout, VWAP momentum, pullback continuation
+  - Elite Trader, Trade2Win, QuantConnect forums
+  - Academic: intraday momentum, opening range anomalies, microstructure
+  - Practitioner blogs: QuantConnect, Alpaca docs, systematic trading writeups
+
+For each source type, extract:
+  - What entry filters do profitable ORB/VWAP traders use that we DON'T have?
+  - Common failure modes (fake breakouts, lunch chop, low RVOL days)
+  - Position sizing approaches for intraday systems
+  - Realistic win rates / PF / trade frequency expectations
+  - Whether "AI/ML" claims on social media are snake oil vs legitimate
+
+Map every finding to: "Add to config.py", "Add to strategy", "Add to ML features",
+"Ignore — not backtestable", or "Test in research only".
+
+================================================================================
+DATA CONSTRAINTS
+================================================================================
+
+  - Historical minute CSVs: roughly Sep 2025 – Jun 2026 (~9 months) for most symbols
+  - ORB-PBC extended run used data back to 2023 for some symbols
+  - No bid/ask spread in historical CSVs (spread filter unavailable in backtest)
+  - No FOMC/economic calendar in repo
+  - Alpaca IEX feed (not full SIP) — may affect volume/price quality
+
+Recommend: how much history we need, whether to pay for Polygon/other data,
+and whether 9 months is enough to claim profitability.
+
+================================================================================
+DELIVERABLES WE EXPECT FROM YOU
+================================================================================
+
+1. EXECUTIVE SUMMARY (1 page)
+   - Are we close to profitable or far away? Honest assessment.
+   - Top 3 highest-ROI changes ranked by expected impact
+
+2. PROFITABILITY ROADMAP (prioritized, 30/60/90 day)
+   - Specific parameter/strategy changes with expected effect
+   - Which strategy to focus on (OR/VWAP vs ORB-PBC vs new)
+   - Minimum backtest sample size before paper trading
+   - Paper trading success criteria before any live consideration
+
+3. ML BRAIN v2 SPEC
+   - Architecture, features, labeling, model choice, evaluation
+   - Code files to create/modify
+   - Target metrics (OOS PF, approved trade win rate, false reject rate)
+
+4. LLM INTEGRATION RECOMMENDATION
+   - Yes/no/partial — with clear reasoning
+   - If yes: architecture diagram, API choice, cost, backtest approach
+   - If no: what to do instead to avoid months of blind testing
+
+5. UI / STATISTICS REDESIGN
+   - Wireframe or section-by-section spec for Streamlit dashboard
+   - Exact metrics to show, definitions, color coding, warnings
+   - Single "Partner Summary" panel content
+
+6. RESEARCH DIGEST
+   - 10–20 bullet findings from web/social with source links
+   - Each tagged: IMPLEMENT / RESEARCH / IGNORE
+
+7. IMPLEMENTATION PR CHECKLIST
+   - Ordered list of PRs we should merge (smallest testable increments)
+
+================================================================================
+CONSTRAINTS — DO NOT VIOLATE
+================================================================================
+
+  - Live trading must stay disabled until validation gates pass
+  - ML/LLM must NEVER be sole execution authority — risk gate always wins
+  - No curve-fitting: every change must survive walk-forward or OOS test
+  - No loosening filters just to pass trade-count gates
+  - Prefer minimal, focused diffs over rewrites
+  - Match existing Python conventions in repo
+  - Do not commit secrets (.env keys)
+
+================================================================================
+KEY FILES TO READ FIRST
+================================================================================
+
+  config.py
+  strategies/opening_range_vwap_momentum.py
+  strategies/orb_pullback_continuation.py
+  backtesting/profitability_replay.py
+  backtesting/orb_pbc_engine.py
+  ml_brain/train_model.py
+  ml_brain/data_collector.py
+  ml_brain/feature_builder.py
+  ml_brain/integration.py
+  research_lab_runner.py
+  ml_brain_runner.py
+  validation/performance_gate.py
+  streamlit_app.py
+  dashboard/readme_page.py
+  research_results/orb_pbc_v1/20260701_214334_orb_pbc_v1_202dcfdd.md
+  research_results_etf_9mo/ETF_9MO_RESEARCH_SUMMARY.md
+  models/ml_trade_brain_v1/metadata.json
+  PLATFORM_ARCHITECTURE.md
+  RESEARCH_LAB.md
+
+================================================================================
+SUCCESS DEFINITION
+================================================================================
+
+We will consider this engagement successful if we end up with:
+
+  - A backtested strategy configuration that PASSES validation gates on OOS data
+    (PF ≥ 1.15, positive expectancy, DD ≤ 8%, sufficient trades)
+  - ML Brain that measurably improves OOS profit factor vs ML-off (not just train set)
+  - Dashboard where partner can answer "are we profitable?" in one glance
+  - Clear decision on LLM: implement, defer, or skip — with evidence
+  - No false confidence from overfit models or cherry-picked date ranges
+
+Be direct. Tell us if the current approach is fundamentally flawed and what
+profitable intraday traders actually do differently.
+
+================================================================================
+END OF PROMPT
+================================================================================

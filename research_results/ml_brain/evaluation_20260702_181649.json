@@ -1,0 +1,21 @@
+{
+  "model_version": "ml_trade_brain_v1",
+  "evaluation": {
+    "accuracy": 0.0,
+    "precision": 0.0,
+    "recall": 0.0,
+    "threshold": 0.6,
+    "approved_trade_count": 0,
+    "rejected_trade_count": 1,
+    "approved_trade_win_rate": null,
+    "false_rejects": 1,
+    "good_rejects": 0,
+    "profit_factor_before_ml": Infinity,
+    "profit_factor_after_ml": null,
+    "expectancy_before_ml": 3.1499999999999204,
+    "expectancy_after_ml": null,
+    "average_r_before_ml": 1.4999999999999865,
+    "average_r_after_ml": null
+  },
+  "rows": 2
+}

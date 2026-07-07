@@ -30,7 +30,10 @@ ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 
 ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
 ALPACA_DATA_URL = "https://data.alpaca.markets"
-ALPACA_DATA_FEED = os.getenv("ALPACA_DATA_FEED", "iex")
+# Default changed from "iex" to "sip" 2026-07-07 after data_audit.md confirmed
+# IEX represents roughly 2-4% of consolidated market volume; every RVOL filter,
+# volume-ratio gate, and ML volume feature was computed on that undercounted feed.
+ALPACA_DATA_FEED = os.getenv("ALPACA_DATA_FEED", "sip")
 
 # PLATFORM INTEGRATIONS
 BROKER_PROVIDER = os.getenv("BROKER_PROVIDER", "csv")  # csv | alpaca_paper

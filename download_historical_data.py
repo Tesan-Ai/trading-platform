@@ -53,7 +53,7 @@ def parse_args():
     parser.add_argument("--include-market", action="store_true")
     parser.add_argument("--universe", choices=["none", "etf", "legacy"], default="none")
     parser.add_argument("--output-dir", default="historical_data")
-    parser.add_argument("--feed", default="iex")
+    parser.add_argument("--feed", default="sip")
     parser.add_argument("--batch-size", type=int, default=50)
     return parser.parse_args()
 
